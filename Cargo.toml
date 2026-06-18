@@ -1,0 +1,65 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/subdex-core",
+    # Added in subsequent feature branches as each is implemented:
+    # "crates/subdex-source",
+    # "crates/subdex-store",
+    # "crates/subdex-graphql",
+    # "crates/subdex",
+    # "examples/*",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/UNITNETWORKECOSYSTEM/subdex"
+description = "A general-purpose, code-first indexer framework for Substrate chains, written in Rust."
+
+[workspace.dependencies]
+# async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# substrate client + scale
+subxt = "0.42"
+subxt-core = "0.42"
+parity-scale-codec = { version = "3", features = ["derive"] }
+scale-value = "0.18"
+scale-decode = "0.16"
+
+# storage
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "chrono", "json", "bigdecimal"] }
+
+# graphql / http
+async-graphql = "7"
+async-graphql-axum = "7"
+axum = "0.7"
+
+# serde / config
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# errors / logging
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# misc
+hex = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+
+# internal
+subdex-core = { path = "crates/subdex-core" }
+subdex-source = { path = "crates/subdex-source" }
+subdex-store = { path = "crates/subdex-store" }
+subdex-graphql = { path = "crates/subdex-graphql" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
