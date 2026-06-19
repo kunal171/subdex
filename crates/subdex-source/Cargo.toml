@@ -1,0 +1,19 @@
+[package]
+name = "subdex-source"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "subxt-based direct-RPC DataSource for the subdex framework."
+
+[dependencies]
+subdex-core.workspace = true
+subxt.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+futures.workspace = true
+scale-value.workspace = true
+tracing.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
