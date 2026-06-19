@@ -3,8 +3,8 @@ resolver = "2"
 members = [
     "crates/subdex-core",
     "crates/subdex-source",
+    "crates/subdex-store",
     # Added in subsequent feature branches as each is implemented:
-    # "crates/subdex-store",
     # "crates/subdex-graphql",
     # "crates/subdex",
     # "examples/*",
