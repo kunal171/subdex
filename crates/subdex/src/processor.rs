@@ -10,11 +10,6 @@ use subdex_core::{Block, BlockNumber, DataSource, Handler, Result, Store};
 /// The indexing engine. Generic over a concrete [`DataSource`] `Src` and
 /// [`Store`] `St`; holds a list of [`Handler`]s that share the store's
 /// transaction type so their writes commit with the cursor.
-///
-/// `source`/`config` and the accessor helpers below are consumed by the
-/// backfill + live run loop, which is added in the following commits on this
-/// branch — hence `#[allow(dead_code)]` until then.
-#[allow(dead_code)]
 pub struct Processor<Src, St>
 where
     Src: DataSource,
@@ -57,6 +52,83 @@ where
         self.store.init().await?;
         for h in &self.handlers {
             h.init(&self.store).await?;
+        }
+        Ok(())
+    }
+
+    /// The height to resume indexing from: `cursor + 1` if we've indexed
+    /// anything, else `config.start_height`.
+    async fn resume_height(&self) -> Result<BlockNumber> {
+        Ok(match self.store.cursor().await? {
+            Some(c) => c.number.saturating_add(1),
+            None => self.config.start_height,
+        })
+    }
+
+    /// Backfill from the resume height up to (and including) the source's current
+    /// finalized head, in batches. Returns the next height to process once the
+    /// head is reached. Reorgs encountered during backfill rewind the cursor and
+    /// fetching continues from the corrected height.
+    pub async fn backfill(&self) -> Result<BlockNumber> {
+        let mut next = self.resume_height().await?;
+        let head = self.source.finalized_head().await?;
+
+        while next <= head {
+            let to = next
+                .saturating_add(self.config.batch_size.saturating_sub(1))
+                .min(head);
+            let batch = self.source.fetch_batch(next, to).await?;
+            if batch.blocks.is_empty() {
+                // Source returned nothing for this window; avoid a busy spin.
+                break;
+            }
+
+            for block in &batch.blocks {
+                match self.process_block(block).await? {
+                    None => {
+                        next = block.id.number.saturating_add(1);
+                    }
+                    Some(refetch_from) => {
+                        // Reorg handled: jump back and re-fetch from there.
+                        next = refetch_from;
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(next)
+    }
+
+    /// Follow the finalized tip: pull one batch at a time from the source's
+    /// finalized stream and process each block. `max_batches` bounds the loop
+    /// (`None` runs until the stream ends / errors) — primarily so tests and
+    /// bounded runs terminate. Returns when the stream is exhausted or the bound
+    /// is hit.
+    pub async fn follow(&self, max_batches: Option<usize>) -> Result<()> {
+        let mut count = 0usize;
+        loop {
+            if let Some(max) = max_batches {
+                if count >= max {
+                    break;
+                }
+            }
+            let batch = self.source.next_finalized().await?;
+            count += 1;
+            if batch.blocks.is_empty() {
+                // Nothing new at the tip yet.
+                if max_batches.is_some() {
+                    // Bounded mode (tests): an empty batch means the script is
+                    // exhausted, so stop rather than loop.
+                    break;
+                }
+                continue;
+            }
+            for block in &batch.blocks {
+                // Reorgs at the tip are handled the same way; on a reorg we simply
+                // continue — the next stream blocks will re-deliver the corrected
+                // chain (the source drives ordering at the tip).
+                let _ = self.process_block(block).await?;
+            }
         }
         Ok(())
     }
@@ -112,29 +184,12 @@ where
         Ok(())
     }
 
-    /// The configured backfill batch size. (Used by the run loop, next commit.)
-    #[allow(dead_code)]
-    pub(crate) fn batch_size(&self) -> u32 {
-        self.config.batch_size
-    }
-
-    /// The configured start height (used only when the store has no cursor).
-    #[allow(dead_code)]
-    pub(crate) fn start_height(&self) -> subdex_core::BlockNumber {
-        self.config.start_height
-    }
-
-    /// Access the source (used by the run loop, added later).
-    #[allow(dead_code)]
-    pub(crate) fn source(&self) -> &Src {
-        &self.source
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testkit::{test_block, MemStore, RecordingHandler, ScriptedSource};
+    use crate::testkit::{test_block, test_chain, MemStore, RecordingHandler, ScriptedSource};
     use crate::ProcessorConfig;
 
     fn processor_with(
@@ -146,6 +201,15 @@ mod tests {
             handlers,
             ProcessorConfig::default(),
         )
+    }
+
+    /// A processor over a scripted source replaying `blocks`, with a config.
+    fn processor_over(
+        blocks: Vec<Block>,
+        handlers: Vec<Arc<dyn Handler<MemStore>>>,
+        config: ProcessorConfig,
+    ) -> Processor<ScriptedSource, MemStore> {
+        Processor::new(ScriptedSource::new(blocks), MemStore::new(), handlers, config)
     }
 
     #[tokio::test]
@@ -248,5 +312,51 @@ mod tests {
         assert!(p.store().hash_at(2).await.unwrap().is_none());
         assert!(p.store().hash_at(3).await.unwrap().is_none());
         assert!(p.store().hash_at(1).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn backfill_indexes_full_range_in_batches() {
+        // Chain 0..10; small batch size to exercise multiple batches.
+        let h = Arc::new(RecordingHandler::new());
+        let p = processor_over(
+            test_chain(0, 10),
+            vec![h.clone()],
+            ProcessorConfig::default().with_batch_size(3),
+        );
+
+        let next = p.backfill().await.unwrap();
+
+        assert_eq!(h.heights(), (0..10).collect::<Vec<_>>(), "all blocks indexed in order");
+        assert_eq!(next, 10, "resume height is one past the head");
+        assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 9);
+    }
+
+    #[tokio::test]
+    async fn backfill_resumes_from_existing_cursor() {
+        // Pre-seed the store at height 4, then backfill a 0..8 chain: only 5..8
+        // should be (re)processed.
+        let h = Arc::new(RecordingHandler::new());
+        let p = processor_over(test_chain(0, 8), vec![h.clone()], ProcessorConfig::default());
+        // Seed cursor at 4 by committing blocks 0..=4 first via the source.
+        for b in test_chain(0, 5) {
+            p.commit_block(&b).await.unwrap();
+        }
+        h.seen.lock().unwrap().clear();
+
+        let next = p.backfill().await.unwrap();
+        assert_eq!(h.heights(), vec![5, 6, 7], "resumes at cursor+1");
+        assert_eq!(next, 8);
+    }
+
+    #[tokio::test]
+    async fn follow_processes_streamed_blocks_until_exhausted() {
+        let h = Arc::new(RecordingHandler::new());
+        let p = processor_over(test_chain(0, 4), vec![h.clone()], ProcessorConfig::default());
+
+        // Bounded follow: enough batches to drain the 4 scripted blocks + 1 empty.
+        p.follow(Some(10)).await.unwrap();
+
+        assert_eq!(h.heights(), vec![0, 1, 2, 3]);
+        assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 3);
     }
 }

@@ -231,7 +231,6 @@ pub fn test_block(number: BlockNumber, hash: &str, parent: &str) -> Block {
 
 /// Build a contiguous chain `[start, start+count)` with deterministic hashes
 /// `0x<height>` and correct parent links.
-#[allow(dead_code)] // used by run-loop tests in following commits
 pub fn test_chain(start: BlockNumber, count: u32) -> Vec<Block> {
     (start..start + count)
         .map(|n| {
