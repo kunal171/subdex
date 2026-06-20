@@ -53,6 +53,11 @@ pub fn as_account_hex(value: &Value) -> Option<String> {
 fn collect_bytes(value: &Value) -> Option<Vec<u8>> {
     match &value.value {
         ValueDef::Composite(Composite::Unnamed(items)) => {
+            // A newtype wrapper like `AccountId32([u8; 32])` decodes as a single
+            // unnamed element that is itself the byte array — unwrap that layer.
+            if items.len() == 1 && !is_byte(&items[0]) {
+                return collect_bytes(&items[0]);
+            }
             let mut out = Vec::with_capacity(items.len());
             for it in items {
                 out.push(byte_of(it)?);
@@ -60,12 +65,21 @@ fn collect_bytes(value: &Value) -> Option<Vec<u8>> {
             Some(out)
         }
         ValueDef::Composite(Composite::Named(fields)) => {
-            // e.g. AccountId32(([u8; 32])) — a single unnamed inner; recurse into
-            // the first field's value.
-            fields.first().and_then(|(_, v)| collect_bytes(v))
+            // e.g. a single named inner field wrapping the bytes; recurse into it.
+            if fields.len() == 1 {
+                fields.first().and_then(|(_, v)| collect_bytes(v))
+            } else {
+                None
+            }
         }
         _ => None,
     }
+}
+
+/// Whether a value is a single byte-sized primitive (used to decide if an
+/// unnamed composite is the byte array itself vs a newtype wrapper around it).
+fn is_byte(value: &Value) -> bool {
+    matches!(&value.value, ValueDef::Primitive(Primitive::U128(n)) if *n <= u8::MAX as u128)
 }
 
 /// Extract a single byte from a small unsigned primitive value.
@@ -107,6 +121,19 @@ mod tests {
     fn missing_field_is_none() {
         let v = deposited(1, 1, 1);
         assert!(field(&v, "nonexistent").is_none());
+    }
+
+    #[test]
+    fn extracts_newtype_wrapped_account() {
+        // AccountId32 decodes as Unnamed([ Unnamed([u8; 32]) ]) — a newtype layer
+        // around the byte array. as_account_hex must unwrap it.
+        let inner = Value::unnamed_composite(
+            (0..32).map(|_| Value::u128(0xcd)).collect::<Vec<_>>(),
+        );
+        let wrapped = Value::unnamed_composite(vec![inner]);
+        let hex = as_account_hex(&wrapped).unwrap();
+        assert_eq!(hex.len(), 2 + 64);
+        assert!(hex.starts_with("0xcdcd"));
     }
 
     #[test]
