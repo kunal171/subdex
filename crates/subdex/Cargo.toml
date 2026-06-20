@@ -1,0 +1,21 @@
+[package]
+name = "subdex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The subdex indexing engine: drives a DataSource through Handlers into a Store, with resumable progress and reorg handling."
+
+[dependencies]
+subdex-core.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+# End-to-end integration tests use the real source + store.
+subdex-source.workspace = true
+subdex-store.workspace = true
+sqlx.workspace = true
+scale-value.workspace = true
