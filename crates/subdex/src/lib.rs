@@ -20,8 +20,12 @@
 //! follow.
 
 mod config;
+mod processor;
+#[cfg(test)]
+mod testkit;
 
 pub use config::ProcessorConfig;
+pub use processor::Processor;
 
 // Re-export the core contracts so users depend on a single crate.
 pub use subdex_core::{
