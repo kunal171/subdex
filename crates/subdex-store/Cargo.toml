@@ -1,0 +1,17 @@
+[package]
+name = "subdex-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Postgres-backed Store (cursor + reorg rollback) for the subdex framework."
+
+[dependencies]
+subdex-core.workspace = true
+async-trait.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
