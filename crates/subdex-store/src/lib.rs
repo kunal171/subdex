@@ -12,6 +12,8 @@
 
 mod config;
 mod schema;
+mod store;
 
 pub use config::StoreConfig;
 pub use schema::MIGRATOR;
+pub use store::PgStore;
