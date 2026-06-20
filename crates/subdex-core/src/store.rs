@@ -8,7 +8,7 @@
 //! the cursor advance commit together (all-or-nothing).
 
 use crate::error::Result;
-use crate::types::{BlockId, BlockNumber};
+use crate::types::{Block, BlockId, BlockNumber};
 use async_trait::async_trait;
 
 /// Persistent storage backend for indexer state.
@@ -41,9 +41,16 @@ pub trait Store: Send + Sync {
     /// Begin a transaction scoped to committing one block.
     async fn begin<'a>(&'a self) -> Result<Self::Tx<'a>>;
 
-    /// Within `tx`, advance the cursor to `block` and record its hash. Handlers
-    /// will have already written their entity rows on the same `tx`.
-    async fn set_cursor<'a>(&self, tx: &mut Self::Tx<'a>, block: &BlockId) -> Result<()>;
+    /// Within `tx`, advance the cursor to `block`, recording its hash AND the
+    /// metadata needed for reorg detection (`parent_hash`) and observability
+    /// (`timestamp`, `spec_version`). Handlers will have already written their
+    /// entity rows on the same `tx`, so this call is what makes the block's
+    /// indexing atomic with the cursor advance.
+    ///
+    /// Takes the full [`Block`] rather than just a [`BlockId`] because the store
+    /// must persist `parent_hash` to later validate an incoming block's parent
+    /// and locate the fork point on a reorg (see [`Store::hash_at`]).
+    async fn set_cursor<'a>(&self, tx: &mut Self::Tx<'a>, block: &Block) -> Result<()>;
 
     /// Commit the transaction (handler writes + cursor advance together).
     async fn commit<'a>(&self, tx: Self::Tx<'a>) -> Result<()>;
