@@ -1,0 +1,24 @@
+[package]
+name = "subdex-example-transfers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Example subdex indexer: records Assets.Deposited / Assets.Withdrawn events into Postgres."
+
+[[bin]]
+name = "transfers"
+path = "src/main.rs"
+
+[dependencies]
+subdex.workspace = true
+subdex-source.workspace = true
+subdex-store.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+sqlx.workspace = true
+scale-value.workspace = true
+hex.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true

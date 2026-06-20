@@ -5,10 +5,9 @@ members = [
     "crates/subdex-source",
     "crates/subdex-store",
     "crates/subdex",
+    "examples/*",
     # Added in subsequent feature branches as each is implemented:
     # "crates/subdex-graphql",
-    # "crates/subdex",
-    # "examples/*",
 ]
 
 [workspace.package]
@@ -56,6 +55,7 @@ hex = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 
 # internal
+subdex = { path = "crates/subdex" }
 subdex-core = { path = "crates/subdex-core" }
 subdex-source = { path = "crates/subdex-source" }
 subdex-store = { path = "crates/subdex-store" }
