@@ -11,5 +11,7 @@
 //! transaction lifecycle, and reorg rollback follow.
 
 mod config;
+mod schema;
 
 pub use config::StoreConfig;
+pub use schema::MIGRATOR;
