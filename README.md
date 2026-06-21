@@ -1,50 +1,388 @@
+<div align="center">
+
 # subdex
 
-A general-purpose, **code-first** indexer framework for **Substrate** chains, written in Rust.
+**A general-purpose, code-first blockchain indexer framework for [Substrate](https://substrate.io) chains — written in Rust.**
 
-`subdex` is to Substrate what Subsquid/SQD is — but Rust-native end to end: you
-implement a `Handler` trait in plain Rust, define your own tables, and the
-framework drives a resumable, reorg-safe pipeline from the chain into Postgres,
-with an optional GraphQL API.
+[![CI](https://img.shields.io/badge/CI-pending-lightgrey)](https://github.com/kunal171/subdex)
+[![Rust](https://img.shields.io/badge/rust-1.96%2B-orange)](https://www.rust-lang.org)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
+[![Status](https://img.shields.io/badge/status-alpha-yellow)](#project-status)
 
-## Why
+*subdex is to Substrate what [Subsquid/SQD](https://sqd.dev) is — but Rust-native end to end: you implement a `Handler` trait in plain Rust, define your own tables, and the framework drives a resumable, reorg-safe pipeline from the chain into Postgres, with an optional GraphQL API.*
 
-Indexers that decode against a single pinned runtime metadata silently break when
-a chain upgrades (storage layouts, event shapes, and call encodings drift). `subdex`
-decodes each block against the metadata for **its own** spec version and is built
-in the same language as Substrate itself, so chain types can be shared rather than
-re-derived — eliminating an entire class of indexer/runtime drift bugs.
+</div>
+
+---
+
+## Table of contents
+
+- [Why subdex](#why-subdex)
+- [Architecture](#architecture)
+- [Quickstart — run the example](#quickstart--run-the-example)
+- [Write your own indexer](#write-your-own-indexer)
+- [Serve a GraphQL API](#serve-a-graphql-api)
+- [Crates](#crates)
+- [Configuration](#configuration)
+- [Reorgs & finality](#reorgs--finality)
+- [Testing](#testing)
+- [Project status](#project-status)
+- [License](#license)
+
+---
+
+## Why subdex
+
+Indexers that decode against a **single pinned runtime metadata** silently break
+when a chain upgrades — storage layouts, event shapes, and call encodings drift,
+and your indexer keeps "working" while writing wrong data. subdex avoids this by:
+
+- **Decoding each block against the metadata for _its own_ spec version** — so it
+  stays correct across runtime upgrades automatically, with no per-chain codegen.
+- **Being written in the same language as Substrate itself** — chain types can be
+  shared rather than re-derived, eliminating an entire class of indexer/runtime
+  drift bugs.
+- **Code-first ergonomics** — you write a small Rust `Handler` and define your own
+  tables. No schema DSL, no codegen step, full type safety and the whole Rust
+  ecosystem at your disposal.
+
+It is **resumable** (a `(height, hash)` cursor survives restarts), **reorg-safe**
+(it validates parent hashes and rolls back on forks), and **atomic** (your writes
+commit on the same transaction as the cursor advance — never half-applied).
+
+---
 
 ## Architecture
 
-Three composable traits (in `subdex-core`):
+Three composable traits (defined in `subdex-core`) form the pipeline. You
+implement **`Handler`**; the framework provides the rest.
 
-| Trait | Role | Default impl |
+```
+        ┌──────────────────────────────────────────────────────────────┐
+        │                       Substrate chain                        │
+        │                  (RPC / WSS, e.g. Unit)                      │
+        └───────────────────────────┬──────────────────────────────────┘
+                                     │
+                       ┌─────────────▼──────────────┐
+                       │        DataSource          │   subdex-source
+                       │  (subxt RPC, per-spec      │   → decodes any chain
+                       │   metadata decoding)       │
+                       └─────────────┬──────────────┘
+                                     │  Block { events, extrinsics, spec_version, … }
+                       ┌─────────────▼──────────────┐
+                       │        Processor           │   subdex
+                       │  resume · backfill · follow │   the engine
+                       │  reorg detect + rollback   │
+                       └─────────────┬──────────────┘
+                                     │  one Block at a time, in a txn
+                       ┌─────────────▼──────────────┐
+        YOU WRITE ───▶ │         Handler(s)         │   your code
+                       │  block → your table rows   │
+                       └─────────────┬──────────────┘
+                                     │  writes on the store txn
+                       ┌─────────────▼──────────────┐
+                       │           Store            │   subdex-store
+                       │  cursor · hashes · reorg   │   → Postgres (sqlx)
+                       │  rollback (atomic commit)  │
+                       └─────────────┬──────────────┘
+                                     │
+                       ┌─────────────▼──────────────┐
+                       │          Postgres          │
+                       └─────────────┬──────────────┘
+                                     │
+                       ┌─────────────▼──────────────┐
+                       │       GraphQL API          │   subdex-graphql
+                       │  async-graphql + axum      │   (optional)
+                       │  + GraphiQL playground     │
+                       └────────────────────────────┘
+```
+
+| Trait | Role | Default implementation |
 |---|---|---|
-| `DataSource` | Produces decoded blocks for a range + the live tip | direct RPC via `subxt` (`subdex-source`) |
-| `Handler` | **User-implemented**, code-first: blocks → your rows | — |
+| `DataSource` | Produces decoded blocks for a range + the live finalized tip | direct RPC via `subxt` (`subdex-source`) |
+| `Handler` | **You implement this** — turn a block into your rows | — |
 | `Store` | Owns the cursor + reorg rollback; hands handlers a txn | Postgres via `sqlx` (`subdex-store`) |
 
-```
-Substrate chain ──(DataSource)──▶ decoded Blocks ──(processor)──▶ Handler(s) ──(Store txn)──▶ Postgres ──▶ async-graphql
+Because each is a trait, the pieces are swappable — e.g. a future SQD-portal
+`DataSource` for faster backfill plugs in without touching your handlers.
+
+---
+
+## Quickstart — run the example
+
+The fastest way to see subdex work is the bundled [`transfers`](./examples/transfers)
+example, which indexes `Assets.Deposited` / `Assets.Withdrawn` events into Postgres.
+
+**Prerequisites:** Rust ≥ 1.96, Docker (for Postgres).
+
+```bash
+# 1. A Postgres to index into
+docker run -d --name subdex-db \
+    -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=subdex \
+    -p 55432:5432 postgres:16-alpine
+
+# 2. Run the indexer (defaults to Unit mainnet; backfills ~20 recent blocks,
+#    then follows the tip). Ctrl-C to stop.
+DATABASE_URL=postgres://postgres:postgres@localhost:55432/subdex \
+WS_URL=wss://archive2.mainnet-unit.com \
+    cargo run -p subdex-example-transfers
 ```
 
-The processor advances a `(height, hash)` cursor, commits each block's handler
-writes atomically with the cursor, validates parent hashes to detect reorgs, and
-rolls back above the fork point when one occurs.
+Then query what it indexed (e.g. in `psql` or DBeaver →
+`postgres://postgres:postgres@localhost:55432/subdex`):
+
+```sql
+SELECT direction, count(*) FROM transfers GROUP BY direction;
+
+SELECT block_height, direction, asset_id, account, amount
+FROM transfers ORDER BY block_height DESC LIMIT 10;
+```
+
+```
+ block_height | direction |               account                | amount
+--------------+-----------+--------------------------------------+---------
+      8668945 | withdraw  | 5DAbqA9t7TpVZuetzwSzGk9kdqGCRN3qw…    | 1715514
+      8668945 | deposit   | 5G3tmhfoaaTwEBNGuspZ3scWr1BWUSW7V…   |       0
+```
+
+Accounts are rendered as **SS58** (`5…`) addresses, just like block explorers.
+
+---
+
+## Write your own indexer
+
+An indexer is: **one `Handler`** + **wiring** (source + store + processor). Here is
+a complete, minimal example end to end.
+
+### 1. Add dependencies
+
+```toml
+[dependencies]
+subdex = { git = "https://github.com/kunal171/subdex" }
+subdex-source = { git = "https://github.com/kunal171/subdex" }
+subdex-store = { git = "https://github.com/kunal171/subdex" }
+async-trait = "0.1"
+sqlx = { version = "0.9", features = ["runtime-tokio", "postgres"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+```
+
+### 2. Implement a `Handler`
+
+You own your tables; create them in `init`, write rows in `process_block` using
+the transaction the processor hands you (so your writes commit atomically with
+the indexer cursor).
+
+```rust
+use async_trait::async_trait;
+use subdex::{Block, Handler, Result, Store, SubdexError};
+use subdex_store::PgStore;
+
+struct EventCounter;
+
+#[async_trait]
+impl Handler<PgStore> for EventCounter {
+    // One-time setup: create your own table.
+    async fn init(&self, store: &PgStore) -> Result<()> {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS event_count (
+                block_height BIGINT NOT NULL,
+                pallet TEXT NOT NULL,
+                events BIGINT NOT NULL,
+                PRIMARY KEY (block_height, pallet))",
+        )
+        .execute(store.pool())
+        .await
+        .map_err(|e| SubdexError::Handler(e.to_string()))?;
+        Ok(())
+    }
+
+    // Per block: write rows on the processor's transaction `tx`.
+    async fn process_block<'a>(
+        &self,
+        block: &Block,
+        tx: &mut <PgStore as Store>::Tx<'a>,
+    ) -> Result<()> {
+        use std::collections::HashMap;
+        let mut by_pallet: HashMap<&str, i64> = HashMap::new();
+        for ev in &block.events {
+            *by_pallet.entry(ev.pallet.as_str()).or_default() += 1;
+        }
+        for (pallet, count) in by_pallet {
+            sqlx::query(
+                "INSERT INTO event_count (block_height, pallet, events)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (block_height, pallet) DO UPDATE SET events = EXCLUDED.events",
+            )
+            .bind(block.id.number as i64)
+            .bind(pallet)
+            .bind(count)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| SubdexError::Handler(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    fn name(&self) -> &str { "event-counter" }
+}
+```
+
+### 3. Wire it up and run
+
+```rust
+use std::sync::Arc;
+use subdex::{DataSource, Processor, ProcessorConfig};
+use subdex_source::{SourceConfig, SubxtSource};
+use subdex_store::{PgStore, StoreConfig};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let source = SubxtSource::connect(
+        SourceConfig::new("wss://archive2.mainnet-unit.com"),
+    ).await?;
+    let store = PgStore::connect(
+        StoreConfig::new("postgres://postgres:postgres@localhost:55432/subdex"),
+    ).await?;
+
+    // Start ~50 blocks back; you'd pick a real start height for your use case.
+    let head = source.finalized_head().await?;
+    let start = head.saturating_sub(50);
+
+    let processor = Processor::new(
+        source,
+        store,
+        vec![Arc::new(EventCounter)],
+        ProcessorConfig::from_height(start),
+    );
+
+    processor.init().await?;      // run store migrations + handler.init()
+    processor.backfill().await?;  // catch up to the finalized head
+    processor.follow(None).await?; // then track the tip until stopped
+    Ok(())
+}
+```
+
+That's a complete indexer. The processor resumes from the stored cursor on
+restart, rolls back on reorgs, and commits each block atomically.
+
+---
+
+## Serve a GraphQL API
+
+`subdex-graphql` serves any [`async-graphql`](https://docs.rs/async-graphql)
+schema over HTTP (with a [GraphiQL](https://github.com/graphql/graphiql)
+playground), and ships a built-in **indexer-status** query every indexer gets for
+free:
+
+```rust
+use subdex_graphql::{build_status_schema, serve, GraphqlConfig};
+
+// `pool` is the same PgPool your PgStore uses: `store.pool().clone()`.
+let schema = build_status_schema(pool);
+serve(schema, GraphqlConfig::default()).await?; // http://0.0.0.0:4350/graphql
+```
+
+Open `http://localhost:4350/graphql` for the playground, or query it:
+
+```graphql
+{
+  indexerStatus {
+    height
+    hash
+    specVersion
+    blockTimestamp
+    indexedBlocks
+  }
+}
+```
+
+To expose **your own** tables, write your query resolvers in plain Rust (backed by
+the same pool) and compose them with `StatusQuery` into a schema, then pass it to
+`serve` / `router`.
+
+---
 
 ## Crates
 
-- `subdex-core` — traits + chain-agnostic types (no runtime/db deps). ✅ implemented
-- `subdex-source` — `subxt`-based direct-RPC `DataSource`. _(next)_
-- `subdex-store` — Postgres `Store` via `sqlx`. _(planned)_
-- `subdex-graphql` — `async-graphql` + `axum` serving. _(planned)_
-- `subdex` — the processor + public prelude tying it together. _(planned)_
+| Crate | Purpose | Status |
+|---|---|---|
+| [`subdex-core`](./crates/subdex-core) | Traits (`DataSource`/`Handler`/`Store`) + chain-agnostic types. No runtime/db deps. | ✅ |
+| [`subdex-source`](./crates/subdex-source) | `subxt`-based direct-RPC `DataSource` (per-spec metadata decoding). | ✅ |
+| [`subdex-store`](./crates/subdex-store) | Postgres `Store` via `sqlx` — cursor, hashes, atomic commit, reorg rollback. | ✅ |
+| [`subdex`](./crates/subdex) | The engine: backfill + live-follow run loop, reorg handling. Re-exports the core API. | ✅ |
+| [`subdex-graphql`](./crates/subdex-graphql) | GraphQL serving toolkit (`async-graphql` + `axum`) + built-in status query. | ✅ |
+| [`examples/transfers`](./examples/transfers) | Runnable example: index Assets deposits/withdrawals into Postgres. | ✅ |
 
-## Status
+---
 
-Early development. Built feature-by-feature on branches with tests at each step.
+## Configuration
+
+| Component | Type | Key options |
+|---|---|---|
+| Source | `SourceConfig` | `url` (WSS endpoint), `batch_size` |
+| Store | `StoreConfig` | `url` (Postgres), `max_connections` |
+| Processor | `ProcessorConfig` | `start_height`, `batch_size`, `reorg_retention` |
+| GraphQL | `GraphqlConfig` | `addr` (default `0.0.0.0:4350`), `path` (default `/graphql`) |
+
+The `transfers` example reads `WS_URL`, `DATABASE_URL`, `START_HEIGHT`, `FOLLOW`,
+and `RUST_LOG` from the environment — see its [README](./examples/transfers/README.md).
+
+---
+
+## Reorgs & finality
+
+The processor anchors on the chain's **finalized** head. Before committing a
+block it validates that the block's `parent_hash` matches the hash stored for the
+previous height:
+
+- **Match** → commit normally (handler writes + cursor advance, atomically).
+- **Mismatch** → a reorg replaced the parent; the store rolls back the diverged
+  tail and the processor re-fetches the corrected chain from the fork point.
+
+Because subdex indexes finalized blocks, deep reorgs are not expected; the
+parent-hash check protects against any divergence within the retained window.
+On GRANDPA chains (like Unit) the finalized cursor is clean and unambiguous.
+
+---
+
+## Testing
+
+```bash
+# Fast, offline unit tests (no chain, no database):
+cargo test
+
+# Lint:
+cargo clippy --workspace --all-targets
+
+# Network/DB integration tests are #[ignore]d so offline/CI runs stay green.
+# Run them explicitly with a chain + Postgres available:
+docker run -d --name pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=subdex \
+    -p 55432:5432 postgres:16-alpine
+
+SUBDEX_TEST_WS=wss://archive2.mainnet-unit.com \
+SUBDEX_TEST_DB=postgres://postgres:postgres@localhost:55432/subdex \
+    cargo test --workspace -- --ignored
+```
+
+Integration tests cover: decoding real mainnet blocks (`subdex-source`), the full
+store lifecycle incl. reorg rollback (`subdex-store`), an end-to-end
+mainnet→Postgres run (`subdex`), and serving GraphQL over HTTP (`subdex-graphql`).
+
+---
+
+## Project status
+
+**Alpha.** The core pipeline — ingest → process → store → serve — is complete and
+proven end to end against live Unit mainnet, real Postgres, and real HTTP. APIs
+may still change.
+
+Possible next steps: a one-call `run()` (backfill + follow + graceful shutdown),
+a SQD-portal `DataSource` for faster historical sync, CI, and multi-handler
+examples.
+
+---
 
 ## License
 
-Apache-2.0
+Licensed under the [Apache License, Version 2.0](./LICENSE).
