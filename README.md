@@ -4,7 +4,7 @@
 
 **A general-purpose, code-first blockchain indexer framework for [Substrate](https://substrate.io) chains — written in Rust.**
 
-[![CI](https://img.shields.io/badge/CI-pending-lightgrey)](https://github.com/kunal171/subdex)
+[![CI](https://github.com/kunal171/subdex/actions/workflows/ci.yml/badge.svg)](https://github.com/kunal171/subdex/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/rust-1.96%2B-orange)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-alpha-yellow)](#project-status)
