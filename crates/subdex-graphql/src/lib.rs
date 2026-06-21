@@ -18,7 +18,12 @@
 //! [`GraphqlConfig`]; the server harness and the status query follow.
 
 mod config;
+mod server;
 mod status;
 
 pub use config::GraphqlConfig;
+pub use server::{build_status_schema, router, serve, StatusSchema};
 pub use status::{IndexerStatus, StatusQuery};
+
+// Re-export async-graphql so users can build schemas without a separate dep.
+pub use async_graphql;
