@@ -86,10 +86,7 @@ impl Store for PgStore {
     }
 
     async fn begin<'a>(&'a self) -> Result<Self::Tx<'a>> {
-        self.pool
-            .begin()
-            .await
-            .map_err(|e| store_err("begin", e))
+        self.pool.begin().await.map_err(|e| store_err("begin", e))
     }
 
     async fn set_cursor<'a>(&self, tx: &mut Self::Tx<'a>, block: &Block) -> Result<()> {
@@ -136,7 +133,9 @@ impl Store for PgStore {
             .execute(&mut *tx)
             .await
             .map_err(|e| store_err("rollback delete", e))?;
-        tx.commit().await.map_err(|e| store_err("rollback commit", e))?;
+        tx.commit()
+            .await
+            .map_err(|e| store_err("rollback commit", e))?;
         Ok(())
     }
 }

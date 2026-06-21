@@ -178,11 +178,7 @@ impl ScriptedSource {
 #[async_trait]
 impl DataSource for ScriptedSource {
     async fn finalized_head(&self) -> Result<BlockNumber> {
-        Ok(self
-            .blocks
-            .last()
-            .map(|b| b.id.number)
-            .unwrap_or(0))
+        Ok(self.blocks.last().map(|b| b.id.number).unwrap_or(0))
     }
 
     async fn fetch_batch(&self, from: BlockNumber, to: BlockNumber) -> Result<BlockBatch> {

@@ -36,9 +36,11 @@ async fn make_db(suffix: &str) -> String {
     let mut conn = PgConnection::connect(&admin).await.expect("connect admin");
     // Defensive: drop if a previous run leaked it. `raw_sql` takes an owned
     // String (sqlx 0.9 requires the query to be 'static for DDL).
-    let _ = sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP DATABASE IF EXISTS {db} WITH (FORCE)")))
-        .execute(&mut conn)
-        .await;
+    let _ = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "DROP DATABASE IF EXISTS {db} WITH (FORCE)"
+    )))
+    .execute(&mut conn)
+    .await;
     sqlx::raw_sql(sqlx::AssertSqlSafe(format!("CREATE DATABASE {db}")))
         .execute(&mut conn)
         .await
@@ -51,9 +53,11 @@ async fn drop_db(suffix: &str) {
     let admin = admin_url();
     let db = format!("subdex_test_{suffix}");
     if let Ok(mut conn) = PgConnection::connect(&admin).await {
-        let _ = sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP DATABASE IF EXISTS {db} WITH (FORCE)")))
-            .execute(&mut conn)
-            .await;
+        let _ = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+            "DROP DATABASE IF EXISTS {db} WITH (FORCE)"
+        )))
+        .execute(&mut conn)
+        .await;
         conn.close().await.ok();
     }
 }
@@ -84,13 +88,18 @@ async fn commit_block(store: &PgStore, b: &Block) {
 #[ignore = "database: needs Postgres; run with --ignored"]
 async fn init_is_idempotent_and_cursor_starts_empty() {
     let url = make_db("init").await;
-    let store = PgStore::connect(StoreConfig::new(&url)).await.expect("connect");
+    let store = PgStore::connect(StoreConfig::new(&url))
+        .await
+        .expect("connect");
 
     store.init().await.expect("init");
     // Running init again must not error (migrations are idempotent).
     store.init().await.expect("init again");
 
-    assert!(store.cursor().await.expect("cursor").is_none(), "no blocks yet");
+    assert!(
+        store.cursor().await.expect("cursor").is_none(),
+        "no blocks yet"
+    );
     assert!(store.hash_at(1).await.expect("hash_at").is_none());
 
     drop_db("init").await;
@@ -100,7 +109,9 @@ async fn init_is_idempotent_and_cursor_starts_empty() {
 #[ignore = "database: needs Postgres; run with --ignored"]
 async fn commit_advances_cursor_and_records_metadata() {
     let url = make_db("commit").await;
-    let store = PgStore::connect(StoreConfig::new(&url)).await.expect("connect");
+    let store = PgStore::connect(StoreConfig::new(&url))
+        .await
+        .expect("connect");
     store.init().await.expect("init");
 
     commit_block(&store, &block(1, "0xaa", "0x00", 145)).await;
@@ -121,7 +132,9 @@ async fn commit_advances_cursor_and_records_metadata() {
 #[ignore = "database: needs Postgres; run with --ignored"]
 async fn set_cursor_upsert_is_idempotent() {
     let url = make_db("upsert").await;
-    let store = PgStore::connect(StoreConfig::new(&url)).await.expect("connect");
+    let store = PgStore::connect(StoreConfig::new(&url))
+        .await
+        .expect("connect");
     store.init().await.expect("init");
 
     commit_block(&store, &block(5, "0xold", "0x04", 145)).await;
@@ -140,11 +153,17 @@ async fn set_cursor_upsert_is_idempotent() {
 #[ignore = "database: needs Postgres; run with --ignored"]
 async fn rollback_removes_blocks_above_fork() {
     let url = make_db("rollback").await;
-    let store = PgStore::connect(StoreConfig::new(&url)).await.expect("connect");
+    let store = PgStore::connect(StoreConfig::new(&url))
+        .await
+        .expect("connect");
     store.init().await.expect("init");
 
     for n in 1..=5 {
-        let parent = if n == 1 { "0x00".to_string() } else { format!("0x{:02x}", n - 1) };
+        let parent = if n == 1 {
+            "0x00".to_string()
+        } else {
+            format!("0x{:02x}", n - 1)
+        };
         commit_block(&store, &block(n, &format!("0x{n:02x}"), &parent, 145)).await;
     }
     assert_eq!(store.cursor().await.expect("c").expect("s").number, 5);
@@ -154,9 +173,18 @@ async fn rollback_removes_blocks_above_fork() {
 
     let cursor = store.cursor().await.expect("c").expect("s");
     assert_eq!(cursor.number, 3, "cursor back at fork point");
-    assert!(store.hash_at(4).await.expect("h4").is_none(), "height 4 removed");
-    assert!(store.hash_at(5).await.expect("h5").is_none(), "height 5 removed");
-    assert!(store.hash_at(3).await.expect("h3").is_some(), "height 3 retained");
+    assert!(
+        store.hash_at(4).await.expect("h4").is_none(),
+        "height 4 removed"
+    );
+    assert!(
+        store.hash_at(5).await.expect("h5").is_none(),
+        "height 5 removed"
+    );
+    assert!(
+        store.hash_at(3).await.expect("h3").is_some(),
+        "height 3 retained"
+    );
 
     drop_db("rollback").await;
 }

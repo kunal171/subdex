@@ -25,7 +25,9 @@ mod tests {
             "expected migration version 1 (0001_bookkeeping), got {versions:?}"
         );
         assert!(
-            MIGRATOR.iter().any(|m| m.description.contains("bookkeeping")),
+            MIGRATOR
+                .iter()
+                .any(|m| m.description.contains("bookkeeping")),
             "migration description should identify the bookkeeping schema"
         );
     }

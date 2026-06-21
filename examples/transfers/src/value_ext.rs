@@ -102,7 +102,9 @@ mod tests {
     fn deposited(asset: u128, account_byte: u8, amount: u128) -> Value {
         // AccountId as a 32-byte unnamed composite of u8 primitives.
         let account = Value::unnamed_composite(
-            (0..32).map(|_| Value::u128(account_byte as u128)).collect::<Vec<_>>(),
+            (0..32)
+                .map(|_| Value::u128(account_byte as u128))
+                .collect::<Vec<_>>(),
         );
         Value::named_composite(vec![
             ("asset_id".to_string(), Value::u128(asset)),
@@ -118,8 +120,15 @@ mod tests {
         assert_eq!(as_u128(field(&v, "amount").unwrap()), Some(1_000));
         let who = as_account_ss58(field(&v, "who").unwrap()).unwrap();
         // SS58 (prefix 42) addresses start with '5' and are ~48 base58 chars.
-        assert!(who.starts_with('5'), "ss58 address should start with 5, got {who}");
-        assert!((47..=49).contains(&who.len()), "unexpected ss58 length: {}", who.len());
+        assert!(
+            who.starts_with('5'),
+            "ss58 address should start with 5, got {who}"
+        );
+        assert!(
+            (47..=49).contains(&who.len()),
+            "unexpected ss58 length: {}",
+            who.len()
+        );
         // Round-trips back to the same 32 bytes.
         let decoded: subxt::utils::AccountId32 = who.parse().unwrap();
         assert_eq!(decoded.0, [0xab; 32]);
@@ -135,9 +144,8 @@ mod tests {
     fn extracts_newtype_wrapped_account() {
         // AccountId32 decodes as Unnamed([ Unnamed([u8; 32]) ]) — a newtype layer
         // around the byte array. as_account_ss58 must unwrap it.
-        let inner = Value::unnamed_composite(
-            (0..32).map(|_| Value::u128(0xcd)).collect::<Vec<_>>(),
-        );
+        let inner =
+            Value::unnamed_composite((0..32).map(|_| Value::u128(0xcd)).collect::<Vec<_>>());
         let wrapped = Value::unnamed_composite(vec![inner]);
         let ss58 = as_account_ss58(&wrapped).unwrap();
         assert!(ss58.starts_with('5'));

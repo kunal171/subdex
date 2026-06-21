@@ -52,10 +52,7 @@ where
 }
 
 /// Bind to `config.addr` and serve `schema` until the process is stopped.
-pub async fn serve<Q, M, S>(
-    schema: Schema<Q, M, S>,
-    config: GraphqlConfig,
-) -> std::io::Result<()>
+pub async fn serve<Q, M, S>(schema: Schema<Q, M, S>, config: GraphqlConfig) -> std::io::Result<()>
 where
     Q: ObjectType + 'static,
     M: ObjectType + 'static,

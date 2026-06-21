@@ -98,7 +98,9 @@ impl DataSource for SubxtSource {
                     .await
                     .map_err(|e| SubdexError::Source(format!("at finalized block: {e}")))?;
                 let mapped = map_block(&at, true).await?;
-                Ok(BlockBatch { blocks: vec![mapped] })
+                Ok(BlockBatch {
+                    blocks: vec![mapped],
+                })
             }
             Some(Err(e)) => Err(SubdexError::Source(format!("finalized stream: {e}"))),
             None => Ok(BlockBatch { blocks: vec![] }),
