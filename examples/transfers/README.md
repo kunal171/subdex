@@ -31,7 +31,37 @@ WS_URL=wss://archive2.mainnet-unit.com \
 FOLLOW=0 START_HEIGHT=8660000 cargo run -p subdex-example-transfers
 ```
 
-Then query what it indexed:
+## Query it — GraphQL
+
+By default the example **serves a GraphQL API while it indexes**, at
+`http://localhost:4350/graphql` (open it in a browser for the GraphiQL
+playground). The API exposes the example's own `transfers` data **and** the
+framework's built-in `indexerStatus` in one schema:
+
+```graphql
+{
+  transfersCount
+  transfers(limit: 5, direction: "deposit") {
+    blockHeight
+    direction
+    assetId
+    account   # SS58 address
+    amount
+  }
+  indexerStatus {
+    height
+    specVersion
+    indexedBlocks
+  }
+}
+```
+
+```bash
+curl -s localhost:4350/graphql -H 'content-type: application/json' \
+  -d '{"query":"{ transfersCount indexerStatus { height indexedBlocks } }"}'
+```
+
+Or query the table directly:
 
 ```sql
 SELECT direction, count(*) FROM transfers GROUP BY direction;
@@ -47,6 +77,8 @@ SELECT block_height, direction, asset_id, account, amount
 | `DATABASE_URL` | `postgres://postgres:postgres@localhost:55432/subdex` | Postgres connection                        |
 | `START_HEIGHT` | `finalized_head − 20`                                 | Backfill start (only used on a fresh DB)   |
 | `FOLLOW`       | `1`                                                   | Follow the tip after backfill (`0` exits)  |
+| `SERVE`        | `1`                                                   | Serve the GraphQL API (`0` to disable)     |
+| `GRAPHQL_PORT` | `4350`                                                | Port for the GraphQL server                |
 | `RUST_LOG`     | `info`                                                | Log level                                  |
 
 ## Table
