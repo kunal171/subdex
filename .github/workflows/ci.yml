@@ -16,6 +16,17 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # Dependency audit: security advisories, license policy, banned/duplicate
+  # crates, and source restrictions — per deny.toml.
+  deny:
+    name: cargo-deny (advisories · licenses · bans)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories licenses bans sources
+
   # Fast, hermetic checks: formatting, lints, and the offline test suite.
   # No network, no database — these run on every push/PR and must stay green.
   check:

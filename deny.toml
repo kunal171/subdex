@@ -1,0 +1,48 @@
+# cargo-deny configuration — dependency auditing for the subdex workspace.
+# Run locally with:  cargo deny check
+# See https://embarkstudios.github.io/cargo-deny/
+
+# ─── Security advisories (RustSec) ───────────────────────────────────────────
+[advisories]
+# Deny crates with known security vulnerabilities.
+yanked = "deny"
+# `unmaintained = "workspace"` flags unmaintained crates we depend on directly,
+# without failing on unmaintained transitive deps we can't control.
+unmaintained = "workspace"
+
+# ─── Licenses ────────────────────────────────────────────────────────────────
+[licenses]
+# Allow the permissive licenses common in the Rust / Substrate ecosystem.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+    "0BSD",
+    # Mozilla CA root-certs bundle (webpki-roots), pulled in via rustls TLS.
+    "CDLA-Permissive-2.0",
+]
+# Require a fairly high confidence when guessing a license from text.
+confidence-threshold = 0.8
+
+# ─── Bans (duplicate / disallowed crates) ────────────────────────────────────
+[bans]
+# Duplicate versions are common and mostly harmless in a young Substrate stack;
+# warn rather than fail so CI stays useful without being noisy.
+multiple-versions = "warn"
+wildcards = "allow"
+
+# ─── Sources ─────────────────────────────────────────────────────────────────
+[sources]
+# Only allow crates from crates.io. (Git deps would need to be allow-listed
+# below; we currently have none.)
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
