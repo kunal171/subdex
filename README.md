@@ -257,12 +257,15 @@ async fn main() -> anyhow::Result<()> {
         ProcessorConfig::from_height(start),
     );
 
-    processor.init().await?;      // run store migrations + handler.init()
-    processor.backfill().await?;  // catch up to the finalized head
-    processor.follow(None).await?; // then track the tip until stopped
+    // One call: init -> backfill to the head -> follow the tip, stopping
+    // cleanly on Ctrl-C.
+    processor.run_until(async { let _ = tokio::signal::ctrl_c().await; }).await?;
     Ok(())
 }
 ```
+
+> Prefer fine-grained control? Call the phases yourself:
+> `processor.init().await?` → `processor.backfill().await?` → `processor.follow(None).await?`.
 
 That's a complete indexer. The processor resumes from the stored cursor on
 restart, rolls back on reorgs, and commits each block atomically.
