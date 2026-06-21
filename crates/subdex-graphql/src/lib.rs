@@ -18,5 +18,7 @@
 //! [`GraphqlConfig`]; the server harness and the status query follow.
 
 mod config;
+mod status;
 
 pub use config::GraphqlConfig;
+pub use status::{IndexerStatus, StatusQuery};
