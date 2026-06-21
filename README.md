@@ -26,6 +26,7 @@
 - [Configuration](#configuration)
 - [Reorgs & finality](#reorgs--finality)
 - [Testing](#testing)
+- [Documentation](#documentation)
 - [Project status](#project-status)
 - [License](#license)
 
@@ -368,6 +369,23 @@ SUBDEX_TEST_DB=postgres://postgres:postgres@localhost:55432/subdex \
 Integration tests cover: decoding real mainnet blocks (`subdex-source`), the full
 store lifecycle incl. reorg rollback (`subdex-store`), an end-to-end
 mainnet→Postgres run (`subdex`), and serving GraphQL over HTTP (`subdex-graphql`).
+
+---
+
+## Documentation
+
+In-depth docs live in [`docs/`](./docs):
+
+- **[Purpose & Motivation](./docs/README.md#purpose--motivation)** — why this project
+  exists (runtime-upgrade drift, the Rust/TypeScript mismatch, and how subdex makes
+  both problems structurally impossible).
+- **[Architecture](./docs/architecture.md)** — the end-to-end design, the three
+  traits, the engine, and how the guarantees (atomicity, resumability, reorg-safety,
+  upgrade-correctness) are enforced.
+- **[Code Walkthrough](./docs/code-walkthrough.md)** — a detailed, file-by-file
+  explanation of every crate.
+- **[Data Flow](./docs/data-flow.md)** — a step-by-step trace of one block from the
+  chain into Postgres and out via GraphQL, including the crash-safety and reorg paths.
 
 ---
 
