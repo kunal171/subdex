@@ -1,7 +1,8 @@
 //! The [`Processor`]: drives a source through handlers into a store.
 //!
-//! This module currently implements the per-block commit unit. The reorg check
-//! and the backfill/live run loop are layered on in subsequent commits.
+//! It implements the full run loop — resume, backfill, and live-follow — with
+//! per-block atomic commits and reorg handling. [`run_until`](Processor::run_until)
+//! is the one-call entry point (init → backfill → follow with graceful shutdown).
 
 use crate::config::ProcessorConfig;
 use std::sync::Arc;
@@ -54,6 +55,23 @@ where
             h.init(&self.store).await?;
         }
         Ok(())
+    }
+
+    /// Run the indexer until the `shutdown` future resolves: `init` →
+    /// `backfill` to the finalized head → `follow` the tip, stopping cleanly when
+    /// `shutdown` completes (e.g. a Ctrl-C signal). Returns `Ok(())` on a clean
+    /// shutdown, or the first error encountered.
+    ///
+    /// This is the recommended one-call entry point for a production indexer.
+    /// Backfill runs to completion first (it isn't interrupted mid-history);
+    /// shutdown takes effect during the live-follow phase.
+    pub async fn run_until<F>(&self, shutdown: F) -> Result<()>
+    where
+        F: std::future::Future<Output = ()> + Send,
+    {
+        self.init().await?;
+        self.backfill().await?;
+        self.follow_until(shutdown).await
     }
 
     /// The height to resume indexing from: `cursor + 1` if we've indexed
@@ -131,6 +149,34 @@ where
             }
         }
         Ok(())
+    }
+
+    /// Like [`follow`](Processor::follow) but stops cleanly when `shutdown`
+    /// resolves. Each wait on the source's tip is raced against `shutdown`; if
+    /// shutdown wins, the loop returns `Ok(())`. A batch that is already being
+    /// processed completes first (we only check shutdown while *waiting* for the
+    /// next batch), so a block is never left half-processed.
+    pub async fn follow_until<F>(&self, shutdown: F) -> Result<()>
+    where
+        F: std::future::Future<Output = ()> + Send,
+    {
+        // Pin the shutdown future so it can be polled repeatedly in the loop.
+        tokio::pin!(shutdown);
+        loop {
+            let batch = tokio::select! {
+                biased;
+                _ = &mut shutdown => return Ok(()),
+                next = self.source.next_finalized() => next?,
+            };
+            if batch.blocks.is_empty() {
+                // Nothing new at the tip yet; loop and wait again (the select
+                // above will still observe shutdown).
+                continue;
+            }
+            for block in &batch.blocks {
+                let _ = self.process_block(block).await?;
+            }
+        }
     }
 
     /// Process the next block in chain order, handling reorgs.
@@ -388,6 +434,73 @@ mod tests {
         p.follow(Some(10)).await.unwrap();
 
         assert_eq!(h.heights(), vec![0, 1, 2, 3]);
+        assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 3);
+    }
+
+    #[tokio::test]
+    async fn follow_until_stops_on_shutdown() {
+        let h = Arc::new(RecordingHandler::new());
+        let p = processor_over(
+            test_chain(0, 4),
+            vec![h.clone()],
+            ProcessorConfig::default(),
+        );
+
+        // Shutdown fires after a short delay — long enough to drain the 4
+        // scripted tip blocks, after which the source yields empty batches and
+        // the loop is waiting (so the shutdown branch of the select wins).
+        let shutdown = async {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        };
+        p.follow_until(shutdown).await.unwrap();
+
+        assert_eq!(
+            h.heights(),
+            vec![0, 1, 2, 3],
+            "processed the streamed blocks"
+        );
+        assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 3);
+    }
+
+    #[tokio::test]
+    async fn follow_until_immediate_shutdown_processes_nothing() {
+        let h = Arc::new(RecordingHandler::new());
+        let p = processor_over(
+            test_chain(0, 4),
+            vec![h.clone()],
+            ProcessorConfig::default(),
+        );
+
+        // Already-resolved shutdown: the `biased` select picks it on the first
+        // iteration before any block is fetched.
+        p.follow_until(std::future::ready(())).await.unwrap();
+        assert!(
+            h.heights().is_empty(),
+            "no blocks processed when shutdown is immediate"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_until_backfills_then_follows_then_stops() {
+        // The scripted source serves the same chain for both backfill
+        // (fetch_batch) and follow (next_finalized). After init+backfill indexes
+        // 0..4 (cursor at 3), the follow phase re-streams from index 0; reorg
+        // detection means blocks 0..3 match stored hashes and re-commit
+        // idempotently, and the run stops on shutdown. We assert it terminates
+        // cleanly and the cursor is at the head.
+        let h = Arc::new(RecordingHandler::new());
+        let p = processor_over(
+            test_chain(0, 4),
+            vec![h.clone()],
+            ProcessorConfig::default(),
+        );
+
+        let shutdown = async {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        };
+        p.run_until(shutdown).await.unwrap();
+
+        // Backfill indexed the whole chain; cursor sits at the head.
         assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 3);
     }
 }
