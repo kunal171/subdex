@@ -1,0 +1,21 @@
+[package]
+name = "subdex-graphql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GraphQL serving toolkit (async-graphql + axum) for subdex indexers."
+
+[dependencies]
+subdex-store.workspace = true
+async-graphql.workspace = true
+async-graphql-axum.workspace = true
+axum.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+serde_json.workspace = true
+reqwest.workspace = true
