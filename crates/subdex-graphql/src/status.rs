@@ -74,7 +74,13 @@ mod tests {
         let sdl = schema.sdl();
         assert!(sdl.contains("indexerStatus"), "query field present:\n{sdl}");
         assert!(sdl.contains("type IndexerStatus"));
-        for field in ["height", "hash", "specVersion", "blockTimestamp", "indexedBlocks"] {
+        for field in [
+            "height",
+            "hash",
+            "specVersion",
+            "blockTimestamp",
+            "indexedBlocks",
+        ] {
             assert!(sdl.contains(field), "missing field {field} in SDL:\n{sdl}");
         }
     }

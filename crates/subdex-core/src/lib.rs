@@ -26,9 +26,7 @@ pub use error::{Result, SubdexError};
 pub use handler::Handler;
 pub use source::DataSource;
 pub use store::Store;
-pub use types::{
-    Block, BlockBatch, BlockHash, BlockId, BlockNumber, Event, Extrinsic,
-};
+pub use types::{Block, BlockBatch, BlockHash, BlockId, BlockNumber, Event, Extrinsic};
 
 #[cfg(test)]
 mod tests {
@@ -36,7 +34,10 @@ mod tests {
 
     fn sample_block(number: BlockNumber, hash: &str, parent: &str) -> Block {
         Block {
-            id: BlockId { number, hash: hash.into() },
+            id: BlockId {
+                number,
+                hash: hash.into(),
+            },
             parent_hash: parent.into(),
             timestamp: Some(1_700_000_000_000),
             spec_version: 145,
@@ -66,11 +67,23 @@ mod tests {
 
     #[test]
     fn block_id_equality_is_number_and_hash() {
-        let a = BlockId { number: 5, hash: "0xabc".into() };
-        let b = BlockId { number: 5, hash: "0xabc".into() };
-        let c = BlockId { number: 5, hash: "0xdef".into() };
+        let a = BlockId {
+            number: 5,
+            hash: "0xabc".into(),
+        };
+        let b = BlockId {
+            number: 5,
+            hash: "0xabc".into(),
+        };
+        let c = BlockId {
+            number: 5,
+            hash: "0xdef".into(),
+        };
         assert_eq!(a, b);
-        assert_ne!(a, c, "same height but different hash must not be equal (reorg case)");
+        assert_ne!(
+            a, c,
+            "same height but different hash must not be equal (reorg case)"
+        );
     }
 
     #[test]

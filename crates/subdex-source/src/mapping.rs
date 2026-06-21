@@ -23,7 +23,10 @@ type DynValue = scale_value::Value;
 /// concrete `SubstrateHeader::parent_hash` field — the generic `Header` trait
 /// does not expose a parent hash. `finalized` is supplied by the caller (the
 /// source knows whether this height is at/below the finalized head).
-pub async fn map_block<C>(at: &ClientAtBlock<ChainConfig, C>, finalized: bool) -> Result<Block, SubdexError>
+pub async fn map_block<C>(
+    at: &ClientAtBlock<ChainConfig, C>,
+    finalized: bool,
+) -> Result<Block, SubdexError>
 where
     C: OnlineClientAtBlockT<ChainConfig>,
 {
@@ -58,7 +61,9 @@ where
 /// Decode all extrinsics in the block into [`Extrinsic`]s, tagging each with
 /// its dispatch success (derived from the `System.ExtrinsicSuccess/Failed`
 /// event emitted at the matching phase).
-async fn map_extrinsics<C>(at: &ClientAtBlock<ChainConfig, C>) -> Result<Vec<Extrinsic>, SubdexError>
+async fn map_extrinsics<C>(
+    at: &ClientAtBlock<ChainConfig, C>,
+) -> Result<Vec<Extrinsic>, SubdexError>
 where
     C: OnlineClientAtBlockT<ChainConfig>,
 {
@@ -83,9 +88,7 @@ where
             .unwrap_or_else(|_| scale_value::Value::unnamed_composite(Vec::new()));
 
         let signed = ext.is_signed();
-        let signer = ext
-            .address_bytes()
-            .map(|b| format!("0x{}", hex::encode(b)));
+        let signer = ext.address_bytes().map(|b| format!("0x{}", hex::encode(b)));
 
         out.push(Extrinsic {
             index,
@@ -188,9 +191,7 @@ fn value_first_u64(value: &scale_value::Value) -> Option<u64> {
         ValueDef::Composite(Composite::Named(fields)) => {
             fields.iter().find_map(|(_, v)| value_first_u64(v))
         }
-        ValueDef::Composite(Composite::Unnamed(items)) => {
-            items.iter().find_map(value_first_u64)
-        }
+        ValueDef::Composite(Composite::Unnamed(items)) => items.iter().find_map(value_first_u64),
         _ => None,
     }
 }
@@ -235,10 +236,7 @@ mod tests {
 
     #[test]
     fn value_first_u64_finds_nested_int() {
-        let v = Value::named_composite(vec![(
-            "now".to_string(),
-            Value::u128(42u128),
-        )]);
+        let v = Value::named_composite(vec![("now".to_string(), Value::u128(42u128))]);
         assert_eq!(value_first_u64(&v), Some(42));
     }
 }

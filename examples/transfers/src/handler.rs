@@ -93,8 +93,14 @@ mod tests {
 
     #[test]
     fn direction_maps_only_known_events() {
-        assert_eq!(TransfersHandler::direction("Assets", "Deposited"), Some("deposit"));
-        assert_eq!(TransfersHandler::direction("Assets", "Withdrawn"), Some("withdraw"));
+        assert_eq!(
+            TransfersHandler::direction("Assets", "Deposited"),
+            Some("deposit")
+        );
+        assert_eq!(
+            TransfersHandler::direction("Assets", "Withdrawn"),
+            Some("withdraw")
+        );
         assert_eq!(TransfersHandler::direction("Assets", "Created"), None);
         assert_eq!(TransfersHandler::direction("Balances", "Deposited"), None);
     }

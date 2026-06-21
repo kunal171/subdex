@@ -34,7 +34,11 @@ impl GraphqlConfig {
     /// Override the served path (a leading `/` is added if missing).
     pub fn with_path(mut self, path: impl Into<String>) -> Self {
         let p = path.into();
-        self.path = if p.starts_with('/') { p } else { format!("/{p}") };
+        self.path = if p.starts_with('/') {
+            p
+        } else {
+            format!("/{p}")
+        };
         self
     }
 }

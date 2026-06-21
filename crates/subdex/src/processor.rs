@@ -183,7 +183,6 @@ where
         self.store.commit(tx).await?;
         Ok(())
     }
-
 }
 
 #[cfg(test)]
@@ -209,7 +208,12 @@ mod tests {
         handlers: Vec<Arc<dyn Handler<MemStore>>>,
         config: ProcessorConfig,
     ) -> Processor<ScriptedSource, MemStore> {
-        Processor::new(ScriptedSource::new(blocks), MemStore::new(), handlers, config)
+        Processor::new(
+            ScriptedSource::new(blocks),
+            MemStore::new(),
+            handlers,
+            config,
+        )
     }
 
     #[tokio::test]
@@ -268,8 +272,14 @@ mod tests {
         let p = processor_with(vec![h.clone()]);
 
         // Index 1 then 2; block 2's parent_hash (0x1) matches block 1's hash.
-        assert_eq!(p.process_block(&test_block(1, "0x1", "0x0")).await.unwrap(), None);
-        assert_eq!(p.process_block(&test_block(2, "0x2", "0x1")).await.unwrap(), None);
+        assert_eq!(
+            p.process_block(&test_block(1, "0x1", "0x0")).await.unwrap(),
+            None
+        );
+        assert_eq!(
+            p.process_block(&test_block(2, "0x2", "0x1")).await.unwrap(),
+            None
+        );
 
         assert_eq!(h.heights(), vec![1, 2]);
         assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 2);
@@ -280,7 +290,12 @@ mod tests {
         let h = Arc::new(RecordingHandler::new());
         let p = processor_with(vec![h.clone()]);
         // Height 0: no parent to validate; commits directly.
-        assert_eq!(p.process_block(&test_block(0, "0x0", "0x00")).await.unwrap(), None);
+        assert_eq!(
+            p.process_block(&test_block(0, "0x0", "0x00"))
+                .await
+                .unwrap(),
+            None
+        );
         assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 0);
     }
 
@@ -305,7 +320,11 @@ mod tests {
             .process_block(&test_block(3, "0x3b", "0x2b"))
             .await
             .unwrap();
-        assert_eq!(refetch, Some(2), "caller should re-fetch from the parent height");
+        assert_eq!(
+            refetch,
+            Some(2),
+            "caller should re-fetch from the parent height"
+        );
 
         // Heights 2 and 3 (the diverged tail) are dropped; height 1 retained.
         assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 1);
@@ -326,7 +345,11 @@ mod tests {
 
         let next = p.backfill().await.unwrap();
 
-        assert_eq!(h.heights(), (0..10).collect::<Vec<_>>(), "all blocks indexed in order");
+        assert_eq!(
+            h.heights(),
+            (0..10).collect::<Vec<_>>(),
+            "all blocks indexed in order"
+        );
         assert_eq!(next, 10, "resume height is one past the head");
         assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 9);
     }
@@ -336,7 +359,11 @@ mod tests {
         // Pre-seed the store at height 4, then backfill a 0..8 chain: only 5..8
         // should be (re)processed.
         let h = Arc::new(RecordingHandler::new());
-        let p = processor_over(test_chain(0, 8), vec![h.clone()], ProcessorConfig::default());
+        let p = processor_over(
+            test_chain(0, 8),
+            vec![h.clone()],
+            ProcessorConfig::default(),
+        );
         // Seed cursor at 4 by committing blocks 0..=4 first via the source.
         for b in test_chain(0, 5) {
             p.commit_block(&b).await.unwrap();
@@ -351,7 +378,11 @@ mod tests {
     #[tokio::test]
     async fn follow_processes_streamed_blocks_until_exhausted() {
         let h = Arc::new(RecordingHandler::new());
-        let p = processor_over(test_chain(0, 4), vec![h.clone()], ProcessorConfig::default());
+        let p = processor_over(
+            test_chain(0, 4),
+            vec![h.clone()],
+            ProcessorConfig::default(),
+        );
 
         // Bounded follow: enough batches to drain the 4 scripted blocks + 1 empty.
         p.follow(Some(10)).await.unwrap();

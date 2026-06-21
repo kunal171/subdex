@@ -63,7 +63,11 @@ async fn fetches_and_decodes_recent_blocks() {
             .extrinsics
             .iter()
             .any(|e| e.pallet == "Timestamp" && e.call == "set");
-        assert!(has_timestamp, "block {} missing Timestamp.set", block.id.number);
+        assert!(
+            has_timestamp,
+            "block {} missing Timestamp.set",
+            block.id.number
+        );
         assert!(
             block.timestamp.unwrap_or(0) > 1_500_000_000_000,
             "decoded timestamp should be a plausible ms epoch"
@@ -97,5 +101,8 @@ async fn streams_one_finalized_block() {
     let b = &batch.blocks[0];
     assert!(b.spec_version > 0);
     assert!(b.id.hash.starts_with("0x"));
-    println!("OK: streamed finalized block #{} ({})", b.id.number, b.id.hash);
+    println!(
+        "OK: streamed finalized block #{} ({})",
+        b.id.number, b.id.hash
+    );
 }

@@ -137,7 +137,12 @@ async fn backfills_mainnet_into_postgres() {
     let next = processor.backfill().await.expect("backfill");
 
     // Cursor advanced to the head; resume height is head + 1.
-    let cursor = processor.store().cursor().await.expect("cursor").expect("some");
+    let cursor = processor
+        .store()
+        .cursor()
+        .await
+        .expect("cursor")
+        .expect("some");
     assert_eq!(cursor.number, head, "cursor at finalized head");
     assert_eq!(next, head + 1);
 
@@ -158,9 +163,7 @@ async fn backfills_mainnet_into_postgres() {
         .get(0);
     assert_eq!(in_range, 0, "no events below the start height");
 
-    println!(
-        "OK: indexed blocks {start}..={head} into Postgres, {count} events logged"
-    );
+    println!("OK: indexed blocks {start}..={head} into Postgres, {count} events logged");
 
     drop_db("backfill").await;
 }

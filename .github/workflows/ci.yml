@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Fast, hermetic checks: formatting, lints, and the offline test suite.
+  # No network, no database — these run on every push/PR and must stay green.
+  check:
+    name: fmt · clippy · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # sqlx 0.9 requires rustc >= 1.94; pin a known-good stable.
+          toolchain: "1.96.0"
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry & build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Formatting (cargo fmt --check)
+        run: cargo fmt --all --check
+
+      - name: Lints (cargo clippy -D warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests (offline; #[ignore]d network/DB tests are skipped)
+        run: cargo test --workspace
+
+  # Database-gated integration tests: spin up Postgres and run the #[ignore]d
+  # tests that need a real database (store lifecycle, GraphQL-over-HTTP).
+  # The chain-gated tests (live Unit mainnet) are NOT run in CI — they hit a
+  # public RPC and are meant to be run manually.
+  integration-db:
+    name: db integration (#[ignore]d)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: subdex
+        ports:
+          - 5432:5432
+        # Wait until Postgres is accepting connections before the job starts.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SUBDEX_TEST_DB: postgres://postgres:postgres@localhost:5432/subdex
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.96.0"
+
+      - name: Cache cargo registry & build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Store integration tests
+        run: cargo test -p subdex-store --test pg_store -- --ignored
+
+      - name: GraphQL integration tests
+        run: cargo test -p subdex-graphql --test serve -- --ignored
