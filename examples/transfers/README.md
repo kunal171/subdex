@@ -56,5 +56,5 @@ transfers(id, block_height, event_index, direction, asset_id, account, amount)
   UNIQUE(block_height, event_index)   -- re-indexing is idempotent
 ```
 
-`amount` is `NUMERIC` (balances can exceed i64). `account` is the `0x…` hex of
-the 32-byte AccountId.
+`amount` is `NUMERIC` (balances can exceed i64). `account` is the **SS58** address
+(the `5…` form, Substrate prefix 42 — the same as block explorers / Polkadot.js).

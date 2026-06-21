@@ -37,14 +37,18 @@ pub fn as_u128(value: &Value) -> Option<u128> {
     }
 }
 
-/// Render an account-id-like value (a 32-byte composite of u8s, or a primitive
-/// byte sequence) as a `0x…` hex string.
-pub fn as_account_hex(value: &Value) -> Option<String> {
+/// Render an account-id-like value (a 32-byte composite of u8s, possibly wrapped
+/// in a newtype layer) as a Substrate **SS58** address (the `5…` form, prefix 42
+/// — matching Unit's `SS58Prefix`).
+///
+/// Returns `None` if the value isn't exactly 32 bytes (so we don't emit a
+/// mis-encoded address for an unexpected shape).
+pub fn as_account_ss58(value: &Value) -> Option<String> {
     let bytes = collect_bytes(value)?;
-    if bytes.is_empty() {
-        return None;
-    }
-    Some(format!("0x{}", hex::encode(bytes)))
+    let arr: [u8; 32] = bytes.try_into().ok()?;
+    // subxt's AccountId32 Display impl produces the SS58-check string with the
+    // default Substrate prefix (42), verified compatible with sp_core.
+    Some(subxt::utils::AccountId32(arr).to_string())
 }
 
 /// Recursively collect a byte array from a value that is either a composite of
@@ -112,9 +116,13 @@ mod tests {
         let v = deposited(2, 0xab, 1_000);
         assert_eq!(as_u128(field(&v, "asset_id").unwrap()), Some(2));
         assert_eq!(as_u128(field(&v, "amount").unwrap()), Some(1_000));
-        let who = as_account_hex(field(&v, "who").unwrap()).unwrap();
-        assert_eq!(who.len(), 2 + 64, "32 bytes -> 64 hex chars + 0x");
-        assert!(who.starts_with("0xabab"));
+        let who = as_account_ss58(field(&v, "who").unwrap()).unwrap();
+        // SS58 (prefix 42) addresses start with '5' and are ~48 base58 chars.
+        assert!(who.starts_with('5'), "ss58 address should start with 5, got {who}");
+        assert!((47..=49).contains(&who.len()), "unexpected ss58 length: {}", who.len());
+        // Round-trips back to the same 32 bytes.
+        let decoded: subxt::utils::AccountId32 = who.parse().unwrap();
+        assert_eq!(decoded.0, [0xab; 32]);
     }
 
     #[test]
@@ -126,14 +134,15 @@ mod tests {
     #[test]
     fn extracts_newtype_wrapped_account() {
         // AccountId32 decodes as Unnamed([ Unnamed([u8; 32]) ]) — a newtype layer
-        // around the byte array. as_account_hex must unwrap it.
+        // around the byte array. as_account_ss58 must unwrap it.
         let inner = Value::unnamed_composite(
             (0..32).map(|_| Value::u128(0xcd)).collect::<Vec<_>>(),
         );
         let wrapped = Value::unnamed_composite(vec![inner]);
-        let hex = as_account_hex(&wrapped).unwrap();
-        assert_eq!(hex.len(), 2 + 64);
-        assert!(hex.starts_with("0xcdcd"));
+        let ss58 = as_account_ss58(&wrapped).unwrap();
+        assert!(ss58.starts_with('5'));
+        let decoded: subxt::utils::AccountId32 = ss58.parse().unwrap();
+        assert_eq!(decoded.0, [0xcd; 32], "round-trips to the original bytes");
     }
 
     #[test]
