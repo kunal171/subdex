@@ -5,7 +5,9 @@
 //! is unit-testable offline, and as a binary (`transfers`) that runs the
 //! indexer against a live chain + database.
 
+pub mod graphql;
 pub mod handler;
 pub mod value_ext;
 
+pub use graphql::QueryRoot;
 pub use handler::TransfersHandler;
