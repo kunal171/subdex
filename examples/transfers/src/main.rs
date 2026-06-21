@@ -65,15 +65,25 @@ async fn main() -> anyhow::Result<()> {
         ProcessorConfig::from_height(start),
     );
 
-    tracing::info!(start, head, "initializing + backfilling");
-    processor.init().await?;
-    let next = processor.backfill().await?;
-    tracing::info!(next, "backfill complete");
-
     if follow {
-        tracing::info!("following the finalized tip (Ctrl-C to stop)");
-        // Unbounded follow: runs until the process is stopped.
-        processor.follow(None).await?;
+        // One-call run: init -> backfill -> follow the tip until Ctrl-C.
+        tracing::info!(
+            start,
+            head,
+            "indexing — backfill then follow (Ctrl-C to stop)"
+        );
+        let shutdown = async {
+            let _ = tokio::signal::ctrl_c().await;
+            tracing::info!("shutdown signal received; stopping after the current block");
+        };
+        processor.run_until(shutdown).await?;
+        tracing::info!("stopped cleanly");
+    } else {
+        // Backfill only, then exit.
+        tracing::info!(start, head, "initializing + backfilling");
+        processor.init().await?;
+        let next = processor.backfill().await?;
+        tracing::info!(next, "backfill complete");
     }
 
     Ok(())
