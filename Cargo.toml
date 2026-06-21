@@ -7,7 +7,7 @@ members = [
     "crates/subdex",
     "examples/*",
     # Added in subsequent feature branches as each is implemented:
-    # "crates/subdex-graphql",
+    "crates/subdex-graphql",
 ]
 
 [workspace.package]
