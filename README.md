@@ -302,8 +302,10 @@ Open `http://localhost:4350/graphql` for the playground, or query it:
 ```
 
 To expose **your own** tables, write your query resolvers in plain Rust (backed by
-the same pool) and compose them with `StatusQuery` into a schema, then pass it to
-`serve` / `router`.
+the same pool) and compose them with `StatusQuery` (via `async_graphql`'s
+`MergedObject`) into a schema, then pass it to `serve` / `router`. The
+[`transfers` example](./examples/transfers) does exactly this — it indexes **and**
+serves a `transfers` query alongside `indexerStatus` from a single binary.
 
 ---
 
