@@ -192,15 +192,27 @@ impl DataSource for ScriptedSource {
     }
 
     async fn next_finalized(&self) -> Result<BlockBatch> {
-        let mut idx = self.next_idx.lock().unwrap();
-        if *idx < self.blocks.len() {
-            let b = self.blocks[*idx].clone();
-            *idx += 1;
-            Ok(BlockBatch { blocks: vec![b] })
-        } else {
-            // No more scripted blocks; return empty (the run loop treats an empty
-            // tip batch as "nothing new yet").
-            Ok(BlockBatch { blocks: vec![] })
+        let next = {
+            let mut idx = self.next_idx.lock().unwrap();
+            if *idx < self.blocks.len() {
+                let b = self.blocks[*idx].clone();
+                *idx += 1;
+                Some(b)
+            } else {
+                None
+            }
+        };
+        match next {
+            Some(b) => Ok(BlockBatch { blocks: vec![b] }),
+            None => {
+                // No more scripted blocks. A *real* finalized-tip stream blocks
+                // here until the node finalizes a new block; we model that with a
+                // short async sleep (rather than returning empty immediately),
+                // which both reflects reality and lets a racing shutdown future's
+                // timer make progress instead of being starved by a busy loop.
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                Ok(BlockBatch { blocks: vec![] })
+            }
         }
     }
 
