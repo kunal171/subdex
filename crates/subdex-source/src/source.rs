@@ -16,7 +16,7 @@ use subxt::OnlineClient;
 pub type ChainConfig = PolkadotConfig;
 
 /// A direct-RPC data source. Decodes each block against the metadata of its own
-/// spec version, producing the framework's chain-agnostic [`Block`] model.
+/// spec version, producing the framework's chain-agnostic [`Block`](subdex_core::Block) model.
 pub struct SubxtSource {
     client: OnlineClient<ChainConfig>,
     config: SourceConfig,

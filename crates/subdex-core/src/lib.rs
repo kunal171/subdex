@@ -6,7 +6,7 @@
 //! The framework is built around three traits that compose into an indexing
 //! pipeline:
 //!
-//! - [`DataSource`] — produces decoded [`Block`](types::Block)s for a range and
+//! - [`DataSource`] — produces decoded [`Block`]s for a range and
 //!   the live tip (default impl: direct RPC via `subxt`).
 //! - [`Handler`] — user-implemented, code-first; turns blocks into their own
 //!   database rows (default store: Postgres).

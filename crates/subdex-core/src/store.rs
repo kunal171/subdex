@@ -13,9 +13,10 @@ use async_trait::async_trait;
 
 /// Persistent storage backend for indexer state.
 ///
-/// The unit of atomicity is a single block: [`commit_block`](Store::commit_block)
-/// must persist the handler's writes *and* advance the cursor to that block in
-/// one transaction. On a reorg, [`rollback_to`](Store::rollback_to) must undo
+/// The unit of atomicity is a single block: a transaction obtained from
+/// [`begin`](Store::begin) carries both the handler's writes and the cursor
+/// advance ([`set_cursor`](Store::set_cursor)), so [`commit`](Store::commit)
+/// persists them together. On a reorg, [`rollback_to`](Store::rollback_to) must undo
 /// everything strictly above a height.
 #[async_trait]
 pub trait Store: Send + Sync {
