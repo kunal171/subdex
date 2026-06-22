@@ -111,6 +111,28 @@ data-flow trace.
 - Dependencies should be at their latest compatible versions; the dependency audit
   (`cargo deny`) runs in CI.
 
+## Releases
+
+Releases are cut by **pushing a version tag**; the
+[`release` workflow](./.github/workflows/release.yml) does the rest (re-runs the
+checks, builds the example binary, and creates the GitHub Release).
+
+We ship a **pre-release for every update**. Pre-releases use a semver pre-release
+suffix and increment per release:
+
+```bash
+# From an up-to-date, green `main`:
+git tag v0.1.0-alpha.2     # bump the alpha number each time
+git push origin v0.1.0-alpha.2
+```
+
+- A tag containing a `-` (e.g. `v0.1.0-alpha.2`, `v0.1.0-rc.1`) is published as a
+  **pre-release**.
+- A clean `vX.Y.Z` tag (no suffix) is published as a **full release**.
+
+The workflow refuses to release if `fmt`/`clippy`/`doc`/`test` don't pass on the
+tagged commit, so only green code ships.
+
 ## Reporting issues
 
 Open a GitHub issue with: what you expected, what happened, and a minimal
