@@ -1,8 +1,8 @@
 //! # subdex
 //!
-//! The indexing **engine**: it drives a [`DataSource`](subdex_core::DataSource)
-//! through one or more [`Handler`](subdex_core::Handler)s into a
-//! [`Store`](subdex_core::Store), keeping a resumable cursor and handling chain
+//! The indexing **engine**: it drives a [`DataSource`]
+//! through one or more [`Handler`]s into a
+//! [`Store`], keeping a resumable cursor and handling chain
 //! reorganizations.
 //!
 //! The run loop, in brief:
