@@ -43,8 +43,10 @@ where
     };
     let spec_version = at.spec_version();
 
-    let extrinsics = map_extrinsics(at).await?;
-    let events = map_events(at).await?;
+    // Fetch events ONCE and derive both the event list and the per-extrinsic
+    // success map from it (avoids a second events RPC round-trip per block).
+    let (events, success) = map_events(at).await?;
+    let extrinsics = map_extrinsics(at, &success).await?;
     let timestamp = extract_timestamp(&extrinsics);
 
     Ok(Block {
@@ -58,17 +60,16 @@ where
     })
 }
 
-/// Decode all extrinsics in the block into [`Extrinsic`]s, tagging each with
-/// its dispatch success (derived from the `System.ExtrinsicSuccess/Failed`
-/// event emitted at the matching phase).
+/// Decode all extrinsics in the block into [`Extrinsic`]s, tagging each with its
+/// dispatch success from the pre-built `success` map (derived from the block's
+/// `System.ExtrinsicSuccess/Failed` events).
 async fn map_extrinsics<C>(
     at: &ClientAtBlock<ChainConfig, C>,
+    success: &std::collections::HashMap<u32, bool>,
 ) -> Result<Vec<Extrinsic>, SubdexError>
 where
     C: OnlineClientAtBlockT<ChainConfig>,
 {
-    let success = extrinsic_success_map(at).await?;
-
     let exts = at
         .extrinsics()
         .fetch()
@@ -103,8 +104,12 @@ where
     Ok(out)
 }
 
-/// Decode all events in the block into [`Event`]s.
-async fn map_events<C>(at: &ClientAtBlock<ChainConfig, C>) -> Result<Vec<Event>, SubdexError>
+/// Fetch the block's events ONCE, returning both the decoded [`Event`] list and
+/// an `extrinsic_index -> success` map (from `System.ExtrinsicSuccess/Failed`),
+/// so callers don't fetch events twice.
+async fn map_events<C>(
+    at: &ClientAtBlock<ChainConfig, C>,
+) -> Result<(Vec<Event>, std::collections::HashMap<u32, bool>), SubdexError>
 where
     C: OnlineClientAtBlockT<ChainConfig>,
 {
@@ -115,17 +120,34 @@ where
         .map_err(|e| SubdexError::Source(format!("fetch events: {e}")))?;
 
     let mut out = Vec::new();
+    let mut success = std::collections::HashMap::new();
     for (i, ev) in events.iter().enumerate() {
         let ev = ev.map_err(|e| SubdexError::Decode(format!("event: {e}")))?;
+
+        let phase = ev.phase();
+        let extrinsic_index = match phase {
+            Phase::ApplyExtrinsic(n) => Some(n),
+            _ => None,
+        };
+
+        // Build the success map from System.ExtrinsicSuccess/Failed in the same pass.
+        if ev.pallet_name() == "System" {
+            if let Phase::ApplyExtrinsic(idx) = phase {
+                match ev.event_name() {
+                    "ExtrinsicSuccess" => {
+                        success.insert(idx, true);
+                    }
+                    "ExtrinsicFailed" => {
+                        success.insert(idx, false);
+                    }
+                    _ => {}
+                }
+            }
+        }
 
         let fields = ev
             .decode_fields_unchecked_as::<DynValue>()
             .unwrap_or_else(|_| scale_value::Value::unnamed_composite(Vec::new()));
-
-        let extrinsic_index = match ev.phase() {
-            Phase::ApplyExtrinsic(n) => Some(n),
-            _ => None,
-        };
 
         out.push(Event {
             index: i as u32,
@@ -135,42 +157,7 @@ where
             extrinsic_index,
         });
     }
-    Ok(out)
-}
-
-/// Build a map of `extrinsic_index -> success` by scanning `System` events:
-/// `ExtrinsicSuccess` => true, `ExtrinsicFailed` => false, keyed by the phase's
-/// extrinsic index.
-async fn extrinsic_success_map<C>(
-    at: &ClientAtBlock<ChainConfig, C>,
-) -> Result<std::collections::HashMap<u32, bool>, SubdexError>
-where
-    C: OnlineClientAtBlockT<ChainConfig>,
-{
-    let events = at
-        .events()
-        .fetch()
-        .await
-        .map_err(|e| SubdexError::Source(format!("fetch events: {e}")))?;
-
-    let mut map = std::collections::HashMap::new();
-    for ev in events.iter() {
-        let ev = ev.map_err(|e| SubdexError::Decode(format!("event: {e}")))?;
-        if ev.pallet_name() == "System" {
-            if let Phase::ApplyExtrinsic(idx) = ev.phase() {
-                match ev.event_name() {
-                    "ExtrinsicSuccess" => {
-                        map.insert(idx, true);
-                    }
-                    "ExtrinsicFailed" => {
-                        map.insert(idx, false);
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-    Ok(map)
+    Ok((out, success))
 }
 
 /// Extract the block timestamp (ms) from the `Timestamp.set { now }` extrinsic,
