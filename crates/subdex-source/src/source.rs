@@ -69,12 +69,19 @@ impl DataSource for SubxtSource {
         }
         // Cap the returned span to the configured batch size.
         let end = to.min(from.saturating_add(self.config.batch_size.saturating_sub(1)));
-        let mut blocks = Vec::with_capacity((end - from + 1) as usize);
-        for h in from..=end {
-            // Anything in [from, to] requested as a batch is treated as finalized
-            // (backfill range); live unfinalized blocks come via `next_finalized`.
-            blocks.push(self.fetch_one(h, true).await?);
-        }
+
+        // Direct RPC is latency-bound, so fetch the span's blocks CONCURRENTLY
+        // (up to `concurrency` in flight) rather than one-at-a-time. `buffered`
+        // preserves input order, so the returned blocks stay in height order.
+        // Anything in [from, to] requested as a batch is treated as finalized
+        // (backfill range); live unfinalized blocks come via `next_finalized`.
+        use futures::stream::{self, StreamExt, TryStreamExt};
+        let blocks: Vec<subdex_core::Block> = stream::iter(from..=end)
+            .map(|h| self.fetch_one(h, true))
+            .buffered(self.config.concurrency)
+            .try_collect()
+            .await?;
+
         Ok(BlockBatch { blocks })
     }
 
