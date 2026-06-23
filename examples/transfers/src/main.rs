@@ -6,21 +6,21 @@
 //! `transfers` table — and (by default) serves a GraphQL API over the indexed
 //! data alongside indexing.
 //!
-//! Configuration via environment variables:
+//! Configuration is read from the environment (a local `.env` is auto-loaded if
+//! present — see `.env.example`).
 //!
-//! | Var            | Default                                   | Meaning                         |
-//! |----------------|-------------------------------------------|---------------------------------|
-//! | `WS_URL`       | `wss://archive2.mainnet-unit.com`         | Chain RPC endpoint              |
-//! | `DATABASE_URL` | `postgres://postgres:postgres@localhost:55432/subdex` | Postgres connection |
-//! | `START_HEIGHT` | `finalized_head - 20`                     | Backfill start (fresh DB only)  |
-//! | `FOLLOW`       | `1`                                       | Follow the tip after backfill (`0` to exit) |
-//! | `SERVE`        | `1`                                       | Serve the GraphQL API (`0` to disable) |
-//! | `GRAPHQL_PORT` | `4350`                                    | Port for the GraphQL server     |
+//! | Var            | Required | Default | Meaning                              |
+//! |----------------|----------|---------|--------------------------------------|
+//! | `WS_URL`       | **yes**  | —       | Chain RPC endpoint                   |
+//! | `DATABASE_URL` | **yes**  | —       | Postgres connection                  |
+//! | `START_HEIGHT` | no       | `head-20` | Backfill start (fresh DB only)     |
+//! | `FOLLOW`       | no       | `1`     | Follow the tip after backfill (`0` exits) |
+//! | `SERVE`        | no       | `1`     | Serve the GraphQL API (`0` to disable) |
+//! | `GRAPHQL_PORT` | no       | `4350`  | Port for the GraphQL server          |
 //!
 //! ```bash
-//! DATABASE_URL=postgres://postgres:postgres@localhost:55432/subdex \
-//! WS_URL=wss://archive2.mainnet-unit.com \
-//!     cargo run -p subdex-example-transfers
+//! cp .env.example .env   # then edit WS_URL / DATABASE_URL
+//! cargo run -p subdex-example-transfers
 //! ```
 
 use async_graphql::{EmptyMutation, EmptySubscription, Schema};
@@ -31,12 +31,25 @@ use subdex_graphql::{serve as serve_graphql, GraphqlConfig};
 use subdex_source::{SourceConfig, SubxtSource};
 use subdex_store::{PgStore, StoreConfig};
 
+/// Read an optional env var (tuning knob) with a default.
 fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
 }
 
+/// Read a required env var, erroring with a clear message if it's missing.
+fn require_env(key: &str) -> anyhow::Result<String> {
+    std::env::var(key).map_err(|_| {
+        anyhow::anyhow!(
+            "missing required env var `{key}` (set it in .env or the environment — see .env.example)"
+        )
+    })
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load a local .env if present (ignored if absent; real env vars win).
+    let _ = dotenvy::dotenv();
+
     // Logs: set RUST_LOG=info for progress output.
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -44,11 +57,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let ws = env_or("WS_URL", "wss://archive2.mainnet-unit.com");
-    let db = env_or(
-        "DATABASE_URL",
-        "postgres://postgres:postgres@localhost:55432/subdex",
-    );
+    // Required configuration — no hardcoded endpoints/credentials.
+    let ws = require_env("WS_URL")?;
+    let db = require_env("DATABASE_URL")?;
+
     let follow = env_or("FOLLOW", "1") != "0";
     let serve = env_or("SERVE", "1") != "0";
     let gql_port: u16 = env_or("GRAPHQL_PORT", "4350").parse().unwrap_or(4350);

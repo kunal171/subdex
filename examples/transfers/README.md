@@ -22,14 +22,21 @@ shape of a real indexer in ~120 lines — a `Handler`, wiring a `SubxtSource` +
 docker run -d --name pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=subdex \
     -p 55432:5432 postgres:16-alpine
 
-# 2. Run the indexer (defaults to Unit mainnet, last ~20 blocks, then follows)
-DATABASE_URL=postgres://postgres:postgres@localhost:55432/subdex \
-WS_URL=wss://archive2.mainnet-unit.com \
-    cargo run -p subdex-example-transfers
+# 2. Configure (WS_URL + DATABASE_URL are required)
+cp examples/transfers/.env.example examples/transfers/.env
+#   edit the .env if your endpoints differ
 
-# backfill only (don't follow the tip), from a specific height:
+# 3. Run the indexer (backfills ~20 recent blocks, then follows the tip)
+cargo run -p subdex-example-transfers
+
+# backfill only (don't follow the tip), from a specific height — env vars
+# always override the .env file:
 FOLLOW=0 START_HEIGHT=8660000 cargo run -p subdex-example-transfers
 ```
+
+> Config is read from the environment; a local `.env` (in the working directory)
+> is auto-loaded. `WS_URL` and `DATABASE_URL` are **required** — there are no
+> hardcoded endpoints/credentials.
 
 ## Query it — GraphQL
 
