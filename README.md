@@ -122,8 +122,9 @@ docker run -d --name subdex-db \
     -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=subdex \
     -p 55432:5432 postgres:16-alpine
 
-# 2. Configure (WS_URL + DATABASE_URL are required; a local .env is auto-loaded)
-cp examples/transfers/.env.example examples/transfers/.env
+# 2. Configure (WS_URL + DATABASE_URL are required; a local .env is auto-loaded
+#    from the directory you run cargo in — the repo root here)
+cp examples/transfers/.env.example .env
 
 # 3. Run the indexer (backfills ~20 recent blocks, then follows the tip).
 #    Ctrl-C to stop.

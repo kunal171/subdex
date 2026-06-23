@@ -22,8 +22,9 @@ shape of a real indexer in ~120 lines — a `Handler`, wiring a `SubxtSource` +
 docker run -d --name pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=subdex \
     -p 55432:5432 postgres:16-alpine
 
-# 2. Configure (WS_URL + DATABASE_URL are required)
-cp examples/transfers/.env.example examples/transfers/.env
+# 2. Configure (WS_URL + DATABASE_URL are required). The .env is auto-loaded
+#    from the directory you run cargo in (the repo root), so copy it there:
+cp examples/transfers/.env.example .env
 #   edit the .env if your endpoints differ
 
 # 3. Run the indexer (backfills ~20 recent blocks, then follows the tip)
