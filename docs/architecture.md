@@ -90,6 +90,8 @@ changing anything downstream.
 pub trait Handler<S: Store>: Send + Sync {
     async fn init(&self, store: &S) -> Result<()> { Ok(()) }                  // create your tables
     async fn process_block<'a>(&self, block: &Block, tx: &mut S::Tx<'a>) -> Result<()>;  // write rows
+    // optional high-throughput path; defaults to process_block per block:
+    async fn process_batch<'a>(&self, blocks: &[Block], tx: &mut S::Tx<'a>) -> Result<()> { … }
     fn name(&self) -> &str;
 }
 ```
@@ -98,6 +100,12 @@ This is the **only** trait you implement. It is generic over the concrete `Store
 so you receive the store's real transaction handle (`S::Tx`) — for the Postgres
 store that's a `sqlx::Transaction`, on which you run arbitrary SQL. There is no
 schema DSL; you define your tables and write to them in plain Rust.
+
+Implement **`process_block`** for the simplest case (called per block; writes
+still commit per *batch*), or override **`process_batch`** for the highest
+throughput — accumulate rows across the whole batch in memory and bulk-write
+once, avoiding the per-row-upsert anti-pattern. The default `process_batch` just
+calls `process_block` for each block.
 
 The critical contract: **anything you write in `process_block` goes on the
 transaction `tx`**, which the engine commits together with the cursor advance.
@@ -146,35 +154,45 @@ picks up exactly where it left off.
 ### Phase 2 — Backfill
 
 `backfill()` fetches `[resume, finalized_head]` in `batch_size` windows via
-`fetch_batch`, processing each block. It returns once it reaches the head. This is
-the "catch up to now" phase.
+`fetch_batch`, and commits **each fetched batch in a single transaction**
+(`process_batch_blocks`). It returns once it reaches the head. This is the "catch
+up to now" phase.
 
 ### Phase 3 — Follow
 
 `follow()` pulls the source's finalized-block stream (`next_finalized`) one batch
-at a time and processes each block as it's finalized. This is the "stay live"
-phase; it runs until the process is stopped.
+at a time and commits each tip batch (same path as backfill). This is the "stay
+live" phase; it runs until the process is stopped.
 
-Both phases route every block through the same `process_block`, which is where the
-guarantees live.
+Both phases route batches through the same `process_batch_blocks`, which is where
+the guarantees live.
 
 ---
 
 ## The guarantees, and how they're enforced
 
-### Atomicity — a block is all-or-nothing
+### Atomicity — a batch is all-or-nothing
 
-`commit_block` does, in order:
+The engine commits **one transaction per batch** (not per block) — this is the
+DB-side throughput lever, and it keeps the unit of atomicity a whole batch.
+`commit_batch` does, in order:
 
 1. `store.begin()` → open a transaction `tx`.
-2. for each handler: `handler.process_block(block, &mut tx)` → your INSERTs go on `tx`.
-3. `store.set_cursor(&mut tx, block)` → the cursor advance goes on the *same* `tx`.
+2. for each handler: `handler.process_batch(blocks, &mut tx)` → all the batch's
+   INSERTs go on `tx`. (The default `process_batch` calls `process_block` per
+   block; a handler can override it to accumulate across the batch and bulk-write
+   once — the high-throughput path.)
+3. `store.set_cursor(&mut tx, block)` for each block → cursor advance + per-block
+   hashes (for reorg detection) go on the *same* `tx`.
 4. `store.commit(tx)` → commit everything together.
 
 If any handler returns `Err`, `tx` is dropped — Postgres rolls it back, the cursor
-does **not** advance, and **nothing** is persisted. A crash mid-block leaves the
-database exactly as it was before the block. There is no "half-indexed block"
+does **not** advance, and **none** of the batch is persisted. A crash mid-batch
+leaves the database exactly as it was before the batch. There is no "half-indexed"
 state to recover from.
+
+> A single-block `process_block`/`commit_block` path also exists (public helper),
+> but the run loop uses the batch path uniformly.
 
 ### Resumability — survive restarts
 

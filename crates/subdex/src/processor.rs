@@ -101,16 +101,14 @@ where
                 break;
             }
 
-            for block in &batch.blocks {
-                match self.process_block(block).await? {
-                    None => {
-                        next = block.id.number.saturating_add(1);
-                    }
-                    Some(refetch_from) => {
-                        // Reorg handled: jump back and re-fetch from there.
-                        next = refetch_from;
-                        break;
-                    }
+            // Commit the whole batch in one transaction (DB-side throughput).
+            match self.process_batch_blocks(&batch.blocks).await? {
+                None => {
+                    next = batch.blocks.last().unwrap().id.number.saturating_add(1);
+                }
+                Some(refetch_from) => {
+                    // Reorg handled: jump back and re-fetch from there.
+                    next = refetch_from;
                 }
             }
         }
@@ -141,12 +139,11 @@ where
                 }
                 continue;
             }
-            for block in &batch.blocks {
-                // Reorgs at the tip are handled the same way; on a reorg we simply
-                // continue — the next stream blocks will re-deliver the corrected
-                // chain (the source drives ordering at the tip).
-                let _ = self.process_block(block).await?;
-            }
+            // Commit the tip batch in one transaction (same path as backfill).
+            // Reorgs are handled inside; on a reorg we simply continue — the next
+            // stream batches re-deliver the corrected chain (the source drives
+            // ordering at the tip).
+            let _ = self.process_batch_blocks(&batch.blocks).await?;
         }
         Ok(())
     }
@@ -173,9 +170,8 @@ where
                 // above will still observe shutdown).
                 continue;
             }
-            for block in &batch.blocks {
-                let _ = self.process_block(block).await?;
-            }
+            // Commit the tip batch in one transaction (reorg-aware).
+            let _ = self.process_batch_blocks(&batch.blocks).await?;
         }
     }
 
@@ -226,6 +222,62 @@ where
         }
 
         self.store.set_cursor(&mut tx, block).await?;
+        self.store.commit(tx).await?;
+        Ok(())
+    }
+
+    /// Process a contiguous batch of blocks, handling a reorg at the batch
+    /// boundary and committing the whole batch in **one** transaction.
+    ///
+    /// The reorg check is done once, against the batch's first block (the blocks
+    /// within a batch are already known-contiguous from the source). On a reorg
+    /// the diverged tail is rolled back and `Ok(Some(refetch_from))` is returned
+    /// so the caller re-fetches the corrected chain; otherwise the batch is
+    /// committed and `Ok(None)` is returned.
+    ///
+    /// Committing per-batch (not per-block) is the DB-side throughput lever: N
+    /// blocks' handler writes + the cursor advance land in a single transaction.
+    pub async fn process_batch_blocks(&self, blocks: &[Block]) -> Result<Option<BlockNumber>> {
+        let Some(first) = blocks.first() else {
+            return Ok(None);
+        };
+
+        // Reorg check against the first block's parent.
+        if first.id.number > 0 {
+            let parent_height = first.id.number - 1;
+            if let Some(stored_parent_hash) = self.store.hash_at(parent_height).await? {
+                if stored_parent_hash != first.parent_hash {
+                    let fork = parent_height.saturating_sub(1);
+                    self.store.rollback_to(fork).await?;
+                    return Ok(Some(parent_height));
+                }
+            }
+        }
+
+        self.commit_batch(blocks).await?;
+        Ok(None)
+    }
+
+    /// Commit a batch of blocks atomically: open ONE transaction, run every
+    /// handler's `process_batch` over all the blocks, advance the cursor to the
+    /// last block, then commit once. A handler error drops the transaction
+    /// (rolling back the entire batch) — no partial batch is ever persisted.
+    pub async fn commit_batch(&self, blocks: &[Block]) -> Result<()> {
+        if blocks.is_empty() {
+            return Ok(());
+        }
+        let mut tx = self.store.begin().await?;
+
+        for h in &self.handlers {
+            h.process_batch(blocks, &mut tx).await?;
+        }
+
+        // Record every block's hash (needed for reorg detection); the cursor
+        // thus ends at the batch's last block. These are cheap upserts on the
+        // same transaction — the whole batch still commits once.
+        for block in blocks {
+            self.store.set_cursor(&mut tx, block).await?;
+        }
         self.store.commit(tx).await?;
         Ok(())
     }
@@ -502,5 +554,87 @@ mod tests {
 
         // Backfill indexed the whole chain; cursor sits at the head.
         assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 3);
+    }
+
+    #[tokio::test]
+    async fn commit_batch_commits_whole_batch_in_one_call() {
+        let h = Arc::new(RecordingHandler::new());
+        let p = processor_with(vec![h.clone()]);
+
+        let batch = test_chain(0, 5);
+        assert_eq!(p.process_batch_blocks(&batch).await.unwrap(), None);
+
+        // Every block processed, in order.
+        assert_eq!(h.heights(), vec![0, 1, 2, 3, 4]);
+        // ONE process_batch call for the whole batch (not 5).
+        assert_eq!(
+            h.batch_call_count(),
+            1,
+            "the batch commits in a single call"
+        );
+        // Cursor ends at the last block; all hashes recorded for reorg detection.
+        assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 4);
+        assert_eq!(p.store().len(), 5);
+    }
+
+    #[tokio::test]
+    async fn commit_batch_rolls_back_entire_batch_on_handler_error() {
+        // Handler fails at height 3 (mid-batch): the whole batch transaction is
+        // dropped — nothing persisted, cursor not advanced.
+        let h = Arc::new(RecordingHandler::failing_at(3));
+        let p = processor_with(vec![h.clone()]);
+
+        let err = p.process_batch_blocks(&test_chain(0, 5)).await;
+        assert!(err.is_err(), "batch should surface the handler error");
+        assert_eq!(p.store().len(), 0, "no partial batch persisted");
+        assert!(p.store().cursor().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn process_batch_blocks_detects_reorg_at_batch_boundary() {
+        let h = Arc::new(RecordingHandler::new());
+        let p = processor_with(vec![h.clone()]);
+
+        // Index chain 1,2,3 on fork A.
+        assert_eq!(
+            p.process_batch_blocks(&[
+                test_block(1, "0x1a", "0x0"),
+                test_block(2, "0x2a", "0x1a"),
+                test_block(3, "0x3a", "0x2a"),
+            ])
+            .await
+            .unwrap(),
+            None
+        );
+        assert_eq!(p.store().len(), 3);
+
+        // A new batch starting at height 3 on fork B: parent (0x2b) != stored
+        // 0x2a → reorg. Roll back to fork (height 1), refetch from 2.
+        let refetch = p
+            .process_batch_blocks(&[test_block(3, "0x3b", "0x2b")])
+            .await
+            .unwrap();
+        assert_eq!(refetch, Some(2));
+        assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 1);
+    }
+
+    #[tokio::test]
+    async fn backfill_uses_the_batch_path() {
+        // 10-block chain, batch size 3 → 4 batches (3+3+3+1) → 4 process_batch calls.
+        let h = Arc::new(RecordingHandler::new());
+        let p = processor_over(
+            test_chain(0, 10),
+            vec![h.clone()],
+            ProcessorConfig::default().with_batch_size(3),
+        );
+
+        let next = p.backfill().await.unwrap();
+        assert_eq!(h.heights(), (0..10).collect::<Vec<_>>());
+        assert_eq!(next, 10);
+        assert_eq!(
+            h.batch_call_count(),
+            4,
+            "10 blocks / batch_size 3 = 4 batches (one txn each)"
+        );
     }
 }

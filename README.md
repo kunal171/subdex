@@ -231,6 +231,11 @@ impl Handler<PgStore> for EventCounter {
 }
 ```
 
+> The engine commits **one transaction per batch**, so `process_block` is already
+> efficient. For maximum throughput on heavy indexers, override `process_batch`
+> instead — accumulate rows across the whole batch in memory and bulk-insert once
+> (avoids per-row upserts). The default `process_batch` just calls `process_block`.
+
 ### 3. Wire it up and run
 
 ```rust

@@ -8,6 +8,13 @@ RPC to a row in Postgres and out via GraphQL. It ties together the abstractions 
 We'll use the bundled `transfers` example (indexing `Assets.Deposited` /
 `Assets.Withdrawn`) as the concrete case.
 
+> **Note on batching:** for clarity this trace follows a single block N. In
+> practice the engine fetches and commits blocks in **batches** — a whole batch's
+> handler writes and cursor advance commit in **one transaction**
+> (`commit_batch`), which is the same reorg-check-then-commit logic shown below,
+> just applied to N blocks at once. The single-block path (`commit_block`) still
+> exists as a public helper.
+
 ---
 
 ## Setup (once, at startup)
