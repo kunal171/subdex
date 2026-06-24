@@ -139,12 +139,11 @@ where
                 }
                 continue;
             }
-            for block in &batch.blocks {
-                // Reorgs at the tip are handled the same way; on a reorg we simply
-                // continue — the next stream blocks will re-deliver the corrected
-                // chain (the source drives ordering at the tip).
-                let _ = self.process_block(block).await?;
-            }
+            // Commit the tip batch in one transaction (same path as backfill).
+            // Reorgs are handled inside; on a reorg we simply continue — the next
+            // stream batches re-deliver the corrected chain (the source drives
+            // ordering at the tip).
+            let _ = self.process_batch_blocks(&batch.blocks).await?;
         }
         Ok(())
     }
@@ -171,9 +170,8 @@ where
                 // above will still observe shutdown).
                 continue;
             }
-            for block in &batch.blocks {
-                let _ = self.process_block(block).await?;
-            }
+            // Commit the tip batch in one transaction (reorg-aware).
+            let _ = self.process_batch_blocks(&batch.blocks).await?;
         }
     }
 
