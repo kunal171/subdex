@@ -168,43 +168,49 @@ the framework.
 Generic over `Src: DataSource` and `St: Store`, holding `Vec<Arc<dyn Handler<St>>>`
 and a `ProcessorConfig`.
 
-**`commit_block(block)`** — the atomic unit:
+**`commit_batch(blocks)`** — the atomic unit (one transaction per batch):
 
 ```rust
 let mut tx = self.store.begin().await?;
 for h in &self.handlers {
-    h.process_block(block, &mut tx).await?;   // your INSERTs, on tx
+    h.process_batch(blocks, &mut tx).await?;       // all the batch's INSERTs, on tx
 }
-self.store.set_cursor(&mut tx, block).await?; // cursor advance, on tx
-self.store.commit(tx).await?;                 // commit together
+for block in blocks {
+    self.store.set_cursor(&mut tx, block).await?;  // cursor + per-block hashes, on tx
+}
+self.store.commit(tx).await?;                       // commit the whole batch together
 ```
 
-If a handler errors, `tx` is dropped → rolled back → nothing persisted.
+If a handler errors, `tx` is dropped → rolled back → none of the batch is
+persisted. (A single-block `commit_block` exists too, as a public helper.)
 
-**`process_block(block)`** — the reorg-aware wrapper:
+**`process_batch_blocks(blocks)`** — the reorg-aware wrapper (checks the batch's
+first block):
 
 ```rust
-if block.id.number > 0 {
-    let parent_height = block.id.number - 1;
+let first = blocks.first()…;
+if first.id.number > 0 {
+    let parent_height = first.id.number - 1;
     if let Some(stored) = self.store.hash_at(parent_height).await? {
-        if stored != block.parent_hash {
+        if stored != first.parent_hash {
             // reorg: drop the diverged tail and re-fetch from the parent height
             self.store.rollback_to(parent_height.saturating_sub(1)).await?;
             return Ok(Some(parent_height));
         }
     }
 }
-self.commit_block(block).await?;
+self.commit_batch(blocks).await?;
 Ok(None)
 ```
 
 Returns `Ok(Some(refetch_from))` on a reorg (telling the caller where to resume)
-or `Ok(None)` on a normal commit.
+or `Ok(None)` on a normal commit. (`process_block` is the single-block equivalent.)
 
 **`backfill()`** — resumes from `cursor + 1` (or `start_height`), fetches
-`[resume, finalized_head]` in `batch_size` windows, and feeds each block to
-`process_block`. On a reorg it rewinds `next` to the returned refetch height and
-continues.
+`[resume, finalized_head]` in `batch_size` windows, and feeds each batch to
+`process_batch_blocks` (one transaction per batch). On a reorg it rewinds `next`
+to the returned refetch height and continues. `follow()`/`follow_until()` use the
+same batch path for the tip.
 
 **`follow(max_batches)`** — pulls `next_finalized()` batches and processes each
 block, running until the stream ends or the optional bound is hit (the bound exists
