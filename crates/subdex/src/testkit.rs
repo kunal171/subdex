@@ -111,11 +111,14 @@ impl Store for MemStore {
 }
 
 /// A handler that records every block height it processed, and optionally fails
-/// at a configured height (to test transaction rollback).
+/// at a configured height (to test transaction rollback). It also counts how
+/// many times `process_batch` is invoked, so tests can assert the batch path is
+/// used (one call per committed batch).
 #[derive(Clone, Default)]
 pub struct RecordingHandler {
     pub seen: Arc<Mutex<Vec<BlockNumber>>>,
     pub fail_at: Option<BlockNumber>,
+    pub batch_calls: Arc<Mutex<usize>>,
 }
 
 impl RecordingHandler {
@@ -125,13 +128,18 @@ impl RecordingHandler {
 
     pub fn failing_at(height: BlockNumber) -> Self {
         Self {
-            seen: Arc::new(Mutex::new(Vec::new())),
             fail_at: Some(height),
+            ..Self::default()
         }
     }
 
     pub fn heights(&self) -> Vec<BlockNumber> {
         self.seen.lock().unwrap().clone()
+    }
+
+    /// How many times `process_batch` ran (i.e. how many batches were committed).
+    pub fn batch_call_count(&self) -> usize {
+        *self.batch_calls.lock().unwrap()
     }
 }
 
@@ -149,6 +157,20 @@ impl Handler<MemStore> for RecordingHandler {
             )));
         }
         self.seen.lock().unwrap().push(block.id.number);
+        Ok(())
+    }
+
+    /// Override the default to count batch invocations, then delegate to
+    /// `process_block` for each block (so `seen`/`fail_at` behaviour is shared).
+    async fn process_batch<'a>(
+        &self,
+        blocks: &[Block],
+        tx: &mut <MemStore as Store>::Tx<'a>,
+    ) -> Result<()> {
+        *self.batch_calls.lock().unwrap() += 1;
+        for block in blocks {
+            self.process_block(block, tx).await?;
+        }
         Ok(())
     }
 
