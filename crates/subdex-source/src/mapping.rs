@@ -6,6 +6,7 @@
 //! event fields and call args into [`scale_value::Value`]. This is what keeps the
 //! framework correct across runtime upgrades without per-chain codegen.
 
+use crate::config::DataSelection;
 use crate::ChainConfig;
 use subdex_core::{Block, BlockId, Event, Extrinsic, SubdexError};
 use subxt::client::{ClientAtBlock, OnlineClientAtBlockT};
@@ -26,6 +27,7 @@ type DynValue = scale_value::Value;
 pub async fn map_block<C>(
     at: &ClientAtBlock<ChainConfig, C>,
     finalized: bool,
+    selection: DataSelection,
 ) -> Result<Block, SubdexError>
 where
     C: OnlineClientAtBlockT<ChainConfig>,
@@ -33,6 +35,7 @@ where
     let number = at.block_number() as u32;
     let hash = format!("0x{}", hex::encode(at.block_hash().as_ref()));
     let parent_hash = {
+        // The header is always fetched: parent_hash is required for reorg-safety.
         let header = at
             .block_header()
             .await
@@ -43,11 +46,23 @@ where
     };
     let spec_version = at.spec_version();
 
-    // Fetch events ONCE and derive both the event list and the per-extrinsic
-    // success map from it (avoids a second events RPC round-trip per block).
-    let (events, success) = map_events(at).await?;
-    let extrinsics = map_extrinsics(at, &success).await?;
-    let timestamp = extract_timestamp(&extrinsics);
+    // Events: fetch once if selected; the per-extrinsic success map is derived
+    // from them (so it's only available when events are fetched).
+    let (events, success) = if selection.events {
+        map_events(at).await?
+    } else {
+        (Vec::new(), std::collections::HashMap::new())
+    };
+
+    // Extrinsics (and the block timestamp, which lives in the Timestamp.set
+    // extrinsic): fetch only if selected.
+    let (extrinsics, timestamp) = if selection.extrinsics {
+        let exts = map_extrinsics(at, &success).await?;
+        let ts = extract_timestamp(&exts);
+        (exts, ts)
+    } else {
+        (Vec::new(), None)
+    };
 
     Ok(Block {
         id: BlockId { number, hash },
