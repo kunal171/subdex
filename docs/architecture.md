@@ -213,7 +213,7 @@ equal the hash we stored for height `N-1`?
 This keeps the database consistent with the canonical chain even when the chain
 reorganizes under us. Because subdex indexes **finalized** blocks, deep reorgs
 aren't expected — but the check is a correctness backstop, and on GRANDPA chains
-(like Unit) the finalized cursor is unambiguous.
+the finalized cursor is unambiguous.
 
 ### Upgrade-correctness — survive runtime upgrades
 

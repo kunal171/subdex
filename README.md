@@ -61,7 +61,7 @@ implement **`Handler`**; the framework provides the rest.
 ```
         ┌──────────────────────────────────────────────────────────────┐
         │                       Substrate chain                        │
-        │                  (RPC / WSS, e.g. Unit)                      │
+        │                       (RPC / WSS)                           │
         └───────────────────────────┬──────────────────────────────────┘
                                      │
                        ┌─────────────▼──────────────┐
@@ -247,7 +247,7 @@ use subdex_store::{PgStore, StoreConfig};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let source = SubxtSource::connect(
-        SourceConfig::new("wss://archive2.mainnet-unit.com"),
+        SourceConfig::new("wss://your-substrate-node:9944"),
     ).await?;
     let store = PgStore::connect(
         StoreConfig::new("postgres://postgres:postgres@localhost:55432/subdex"),
@@ -355,7 +355,7 @@ previous height:
 
 Because subdex indexes finalized blocks, deep reorgs are not expected; the
 parent-hash check protects against any divergence within the retained window.
-On GRANDPA chains (like Unit) the finalized cursor is clean and unambiguous.
+On GRANDPA chains the finalized cursor is clean and unambiguous.
 
 ---
 
@@ -373,7 +373,7 @@ cargo clippy --workspace --all-targets
 docker run -d --name pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=subdex \
     -p 55432:5432 postgres:16-alpine
 
-SUBDEX_TEST_WS=wss://archive2.mainnet-unit.com \
+SUBDEX_TEST_WS=wss://your-substrate-node:9944 \
 SUBDEX_TEST_DB=postgres://postgres:postgres@localhost:55432/subdex \
     cargo test --workspace -- --ignored
 ```
@@ -404,7 +404,7 @@ In-depth docs live in [`docs/`](./docs):
 ## Project status
 
 **Alpha.** The core pipeline — ingest → process → store → serve — is complete and
-proven end to end against live Unit mainnet, real Postgres, and real HTTP. APIs
+proven end to end against a live Substrate chain, real Postgres, and real HTTP. APIs
 may still change.
 
 Possible next steps: a one-call `run()` (backfill + follow + graceful shutdown),
