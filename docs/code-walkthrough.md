@@ -62,7 +62,7 @@ knows how far to go.
 
 A `DataSource` backed by a direct WebSocket RPC connection via `subxt`. Concrete
 to subxt's `PolkadotConfig` (H256 hashes, `u32` block numbers, `MultiAddress`),
-which matches Unit and most Substrate chains.
+which matches most Substrate chains (H256 hashes, u32 block numbers, MultiAddress).
 
 ### `source.rs` — `SubxtSource`
 
@@ -109,7 +109,7 @@ The header is always fetched — its `parent_hash` is required for reorg-safety.
 ### Tests
 
 - Offline unit tests for the timestamp/value-walk helpers.
-- Two `#[ignore]`d live tests against Unit mainnet
+- Two `#[ignore]`d live tests against a live Substrate chain
   ([`tests/live_unit.rs`](../crates/subdex-source/tests/live_unit.rs)) that fetch
   real blocks and assert contiguity, parent-hash chaining, `Timestamp.set`
   presence, and non-empty decoded event names.

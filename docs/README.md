@@ -99,7 +99,7 @@ Beyond the two core problems, a usable indexer framework has to be:
 
 ### Who it's for
 
-Teams running or building on a Substrate chain (like Unit) who want their indexer
+Teams running or building on a Substrate chain who want their indexer
 to be **correct across runtime upgrades**, **in the same language as their chain**
 (so types and logic can be shared), and **fully under their control** (self-hosted,
 no external indexing service or codegen pipeline to keep in sync).
