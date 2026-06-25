@@ -11,7 +11,7 @@ use subxt::OnlineClient;
 
 /// The subxt `Config` the source uses. `PolkadotConfig` matches the common
 /// Substrate defaults (H256 hashes, u32 block numbers, MultiAddress) and works
-/// for Unit and most solochains/parachains. Exposed at the crate root so the
+/// for most solochains and parachains. Exposed at the crate root so the
 /// mapping module can be concrete to it (see [`crate::ChainConfig`]).
 pub type ChainConfig = PolkadotConfig;
 

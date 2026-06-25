@@ -2,10 +2,11 @@ use subdex_core::DataSource;
 use subdex_source::{DataSelection, SourceConfig, SubxtSource};
 
 #[tokio::test]
-#[ignore = "network: hits Unit mainnet; run with --ignored"]
+#[ignore = "network: hits a live Substrate chain; run with --ignored"]
 async fn events_only_skips_extrinsics() {
-    let url = std::env::var("SUBDEX_TEST_WS")
-        .unwrap_or_else(|_| "wss://archive2.mainnet-unit.com".into());
+    let url = std::env::var("SUBDEX_TEST_WS").expect(
+        "set SUBDEX_TEST_WS to a Substrate RPC endpoint, e.g. wss://your-substrate-node:9944",
+    );
 
     // Full selection: events AND extrinsics present.
     let full = SubxtSource::connect(SourceConfig::new(&url)).await.unwrap();
