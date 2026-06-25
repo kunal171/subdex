@@ -13,18 +13,32 @@ async fn events_only_skips_extrinsics() {
     let fb = full.fetch_batch(head - 2, head).await.unwrap();
     let f = &fb.blocks[0];
     assert!(!f.extrinsics.is_empty(), "full: extrinsics present");
-    assert!(f.timestamp.is_some(), "full: timestamp present (from Timestamp.set)");
+    assert!(
+        f.timestamp.is_some(),
+        "full: timestamp present (from Timestamp.set)"
+    );
 
     // events_only: events present, extrinsics empty, timestamp None.
-    let eo = SubxtSource::connect(
-        SourceConfig::new(&url).with_selection(DataSelection::events_only()),
-    ).await.unwrap();
+    let eo =
+        SubxtSource::connect(SourceConfig::new(&url).with_selection(DataSelection::events_only()))
+            .await
+            .unwrap();
     let eb = eo.fetch_batch(head - 2, head).await.unwrap();
     let e = &eb.blocks[0];
     assert!(!e.events.is_empty(), "events_only: events still present");
     assert!(e.extrinsics.is_empty(), "events_only: extrinsics skipped");
-    assert!(e.timestamp.is_none(), "events_only: timestamp None (no extrinsics)");
+    assert!(
+        e.timestamp.is_none(),
+        "events_only: timestamp None (no extrinsics)"
+    );
     // Same events decoded either way.
-    assert_eq!(e.events.len(), f.events.len(), "event count matches full selection");
-    println!("OK: events_only fetched {} events, 0 extrinsics", e.events.len());
+    assert_eq!(
+        e.events.len(),
+        f.events.len(),
+        "event count matches full selection"
+    );
+    println!(
+        "OK: events_only fetched {} events, 0 extrinsics",
+        e.events.len()
+    );
 }

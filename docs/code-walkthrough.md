@@ -100,6 +100,12 @@ metadata, it needs no generated types and is correct across upgrades. Decode
 failures on an individual extrinsic/event are tolerated (recorded as an empty
 value) rather than aborting the whole block.
 
+**Data selection.** `SourceConfig.selection` (`DataSelection { events, extrinsics }`,
+default both) controls what `map_block` fetches. An events-only indexer can set
+`DataSelection::events_only()` to skip the extrinsics fetch+decode entirely (the
+block `timestamp`, derived from the `Timestamp.set` extrinsic, is then `None`).
+The header is always fetched — its `parent_hash` is required for reorg-safety.
+
 ### Tests
 
 - Offline unit tests for the timestamp/value-walk helpers.
