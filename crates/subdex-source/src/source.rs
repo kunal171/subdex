@@ -46,7 +46,7 @@ impl SubxtSource {
             .at_block(height)
             .await
             .map_err(|e| SubdexError::Source(format!("at_block {height}: {e}")))?;
-        map_block(&at, finalized).await
+        map_block(&at, finalized, self.config.selection).await
     }
 }
 
@@ -104,7 +104,7 @@ impl DataSource for SubxtSource {
                     .at()
                     .await
                     .map_err(|e| SubdexError::Source(format!("at finalized block: {e}")))?;
-                let mapped = map_block(&at, true).await?;
+                let mapped = map_block(&at, true, self.config.selection).await?;
                 Ok(BlockBatch {
                     blocks: vec![mapped],
                 })

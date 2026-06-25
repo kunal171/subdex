@@ -27,5 +27,5 @@ mod config;
 mod mapping;
 mod source;
 
-pub use config::SourceConfig;
+pub use config::{DataSelection, SourceConfig};
 pub use source::{ChainConfig, SubxtSource};
