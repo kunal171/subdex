@@ -407,9 +407,13 @@ In-depth docs live in [`docs/`](./docs):
 proven end to end against a live Substrate chain, real Postgres, and real HTTP. APIs
 may still change.
 
-Possible next steps: a one-call `run()` (backfill + follow + graceful shutdown),
-a SQD-portal `DataSource` for faster historical sync, CI, and multi-handler
-examples.
+The roadmap toward a production-ready 0.2 — reliability (RPC retries, deep-reorg
+handling), performance (an SQD-portal `DataSource`, store pruning), observability
+(Prometheus metrics), and DX (shared config, more examples) — is tracked in the
+[**v0.2 roadmap** milestone](https://github.com/kunal171/subdex/milestone/1).
+Contributions welcome — issues tagged
+[`good first issue`](https://github.com/kunal171/subdex/labels/good%20first%20issue)
+are a friendly place to start.
 
 ---
 
