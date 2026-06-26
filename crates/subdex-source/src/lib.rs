@@ -14,7 +14,7 @@
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let source = SubxtSource::connect(
-//!     SourceConfig::new("wss://archive2.mainnet-unit.com")
+//!     SourceConfig::new("wss://your-substrate-node:9944")
 //! ).await?;
 //! let head = source.finalized_head().await?;
 //! let batch = source.fetch_batch(head.saturating_sub(4), head).await?;

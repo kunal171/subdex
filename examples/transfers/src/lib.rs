@@ -1,5 +1,5 @@
 //! Example subdex indexer — records `Assets.Deposited` / `Assets.Withdrawn`
-//! events (the most common token-movement events on Unit) into Postgres.
+//! events (common token-movement events on Substrate chains) into Postgres.
 //!
 //! This crate doubles as a library so its pure logic (decoding event fields)
 //! is unit-testable offline, and as a binary (`transfers`) that runs the

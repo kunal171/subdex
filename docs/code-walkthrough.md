@@ -110,7 +110,7 @@ The header is always fetched — its `parent_hash` is required for reorg-safety.
 
 - Offline unit tests for the timestamp/value-walk helpers.
 - Two `#[ignore]`d live tests against a live Substrate chain
-  ([`tests/live_unit.rs`](../crates/subdex-source/tests/live_unit.rs)) that fetch
+  ([`tests/live_chain.rs`](../crates/subdex-source/tests/live_chain.rs)) that fetch
   real blocks and assert contiguity, parent-hash chaining, `Timestamp.set`
   presence, and non-empty decoded event names.
 

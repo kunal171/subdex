@@ -1,20 +1,20 @@
-//! Live integration tests against the Unit Network mainnet archive.
+//! Live integration tests against a real Substrate chain.
 //!
 //! These are **network-dependent** and therefore `#[ignore]`d by default so they
-//! never break offline/CI runs. Run them explicitly:
+//! never break offline/CI runs. Point them at a node and run explicitly:
 //!
 //! ```bash
-//! cargo test -p subdex-source --test live_unit -- --ignored --nocapture
+//! SUBDEX_TEST_WS=wss://your-substrate-node:9944 \
+//!     cargo test -p subdex-source --test live_chain -- --ignored --nocapture
 //! ```
-//!
-//! Override the endpoint with `SUBDEX_TEST_WS` if the default is unavailable.
 
 use subdex_core::DataSource;
 use subdex_source::{SourceConfig, SubxtSource};
 
 fn ws_url() -> String {
-    std::env::var("SUBDEX_TEST_WS")
-        .unwrap_or_else(|_| "wss://archive2.mainnet-unit.com".to_string())
+    std::env::var("SUBDEX_TEST_WS").expect(
+        "set SUBDEX_TEST_WS to a Substrate RPC endpoint, e.g. wss://your-substrate-node:9944",
+    )
 }
 
 /// Connects, reads the finalized head, fetches a small recent batch, and asserts
@@ -25,7 +25,7 @@ fn ws_url() -> String {
 /// - the `Timestamp.set` inherent present with a plausible timestamp,
 /// - at least some decoded events with non-empty pallet/name.
 #[tokio::test]
-#[ignore = "network: hits Unit mainnet RPC; run with --ignored"]
+#[ignore = "network: hits a live Substrate RPC; run with --ignored"]
 async fn fetches_and_decodes_recent_blocks() {
     let source = SubxtSource::connect(SourceConfig::new(ws_url()).with_batch_size(5))
         .await
@@ -90,7 +90,7 @@ async fn fetches_and_decodes_recent_blocks() {
 
 /// Asserts the live finalized-block stream yields at least one decoded block.
 #[tokio::test]
-#[ignore = "network: subscribes to Unit mainnet finalized stream; run with --ignored"]
+#[ignore = "network: subscribes to a live finalized stream; run with --ignored"]
 async fn streams_one_finalized_block() {
     let source = SubxtSource::connect(SourceConfig::new(ws_url()))
         .await

@@ -49,7 +49,7 @@ impl DataSelection {
 /// Connection + batching configuration for a [`SubxtSource`](crate::SubxtSource).
 #[derive(Clone, Debug)]
 pub struct SourceConfig {
-    /// WebSocket RPC endpoint of the chain, e.g. `wss://archive2.mainnet-unit.com`.
+    /// WebSocket RPC endpoint of the chain, e.g. `wss://your-substrate-node:9944`.
     pub url: String,
     /// Maximum number of blocks [`fetch_batch`](subdex_core::DataSource::fetch_batch)
     /// returns per call.

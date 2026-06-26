@@ -1,8 +1,8 @@
 # subdex example: `transfers`
 
 A minimal, runnable [`subdex`](../../) indexer. It records every
-`Assets.Deposited` and `Assets.Withdrawn` event (the most common token-movement
-events on Unit) into a Postgres `transfers` table.
+`Assets.Deposited` and `Assets.Withdrawn` event (common token-movement events on
+Substrate chains) into a Postgres `transfers` table.
 
 This is the canonical "how do I use subdex" starting point: it shows the whole
 shape of a real indexer in ~120 lines — a `Handler`, wiring a `SubxtSource` +
@@ -81,8 +81,8 @@ SELECT block_height, direction, asset_id, account, amount
 
 | Var            | Default                                               | Meaning                                    |
 |----------------|-------------------------------------------------------|--------------------------------------------|
-| `WS_URL`       | `wss://archive2.mainnet-unit.com`                     | Chain RPC endpoint                         |
-| `DATABASE_URL` | `postgres://postgres:postgres@localhost:55432/subdex` | Postgres connection                        |
+| `WS_URL`       | **required** (e.g. `wss://your-substrate-node:9944`)  | Chain RPC endpoint                         |
+| `DATABASE_URL` | **required** (e.g. `postgres://postgres:postgres@localhost:55432/subdex`) | Postgres connection     |
 | `START_HEIGHT` | `finalized_head − 20`                                 | Backfill start (only used on a fresh DB)   |
 | `FOLLOW`       | `1`                                                   | Follow the tip after backfill (`0` exits)  |
 | `SERVE`        | `1`                                                   | Serve the GraphQL API (`0` to disable)     |

@@ -39,7 +39,7 @@ pub fn as_u128(value: &Value) -> Option<u128> {
 
 /// Render an account-id-like value (a 32-byte composite of u8s, possibly wrapped
 /// in a newtype layer) as a Substrate **SS58** address (the `5…` form, prefix 42
-/// — matching Unit's `SS58Prefix`).
+/// — the generic Substrate default `SS58Prefix`).
 ///
 /// Returns `None` if the value isn't exactly 32 bytes (so we don't emit a
 /// mis-encoded address for an unexpected shape).

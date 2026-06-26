@@ -72,8 +72,8 @@ The suite has two tiers:
       cargo test --workspace -- --ignored
 
   # Live-chain tests additionally need an RPC endpoint:
-  SUBDEX_TEST_WS=wss://archive2.mainnet-unit.com \
-      cargo test -p subdex-source --test live_unit -- --ignored
+  SUBDEX_TEST_WS=wss://your-substrate-node:9944 \
+      cargo test -p subdex-source --test live_chain -- --ignored
   ```
 
 CI runs the **DB** integration tests (via a Postgres service) but **not** the

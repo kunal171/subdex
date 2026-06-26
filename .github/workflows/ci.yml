@@ -61,7 +61,7 @@ jobs:
 
   # Database-gated integration tests: spin up Postgres and run the #[ignore]d
   # tests that need a real database (store lifecycle, GraphQL-over-HTTP).
-  # The chain-gated tests (live Unit mainnet) are NOT run in CI — they hit a
+  # The chain-gated tests (a live Substrate chain) are NOT run in CI — they hit a
   # public RPC and are meant to be run manually.
   integration-db:
     name: db integration (#[ignore]d)

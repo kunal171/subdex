@@ -1,6 +1,6 @@
-//! End-to-end integration test: a real [`SubxtSource`] (Unit mainnet) feeding a
-//! real [`PgStore`] (Postgres) through the [`Processor`], with a handler that
-//! writes decoded events into its own table.
+//! End-to-end integration test: a real [`SubxtSource`] (a live Substrate chain)
+//! feeding a real [`PgStore`] (Postgres) through the [`Processor`], with a handler
+//! that writes decoded events into its own table.
 //!
 //! **Network + database dependent**, so `#[ignore]`d. Run with both available:
 //!
@@ -8,7 +8,7 @@
 //! docker run -d --name pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=subdex \
 //!     -p 55432:5432 postgres:16-alpine
 //! SUBDEX_TEST_DB=postgres://postgres:postgres@localhost:55432/subdex \
-//! SUBDEX_TEST_WS=wss://archive2.mainnet-unit.com \
+//! SUBDEX_TEST_WS=wss://your-substrate-node:9944 \
 //!     cargo test -p subdex --test e2e -- --ignored --nocapture
 //! ```
 
@@ -25,8 +25,9 @@ fn db_url() -> String {
 }
 
 fn ws_url() -> String {
-    std::env::var("SUBDEX_TEST_WS")
-        .unwrap_or_else(|_| "wss://archive2.mainnet-unit.com".to_string())
+    std::env::var("SUBDEX_TEST_WS").expect(
+        "set SUBDEX_TEST_WS to a Substrate RPC endpoint, e.g. wss://your-substrate-node:9944",
+    )
 }
 
 fn with_db(url: &str, db: &str) -> String {
@@ -111,7 +112,7 @@ impl Handler<PgStore> for EventLogHandler {
 /// mainnet, and assert the cursor advanced and the handler wrote events on the
 /// same transaction.
 #[tokio::test]
-#[ignore = "network+database: needs Unit RPC and Postgres; run with --ignored"]
+#[ignore = "network+database: needs a Substrate RPC and Postgres; run with --ignored"]
 async fn backfills_mainnet_into_postgres() {
     let url = make_db("backfill").await;
 
