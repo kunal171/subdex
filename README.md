@@ -333,7 +333,7 @@ serves a `transfers` query alongside `indexerStatus` from a single binary.
 
 | Component | Type | Key options |
 |---|---|---|
-| Source | `SourceConfig` | `url` (WSS endpoint), `batch_size`, `concurrency`, `selection` (`DataSelection` — fetch only events/extrinsics you need) |
+| Source | `SourceConfig` | `url` (WSS endpoint), `batch_size`, `concurrency`, `selection` (`DataSelection` — fetch only events/extrinsics you need), `retry` (`RetryConfig` — transient-failure backoff) |
 | Store | `StoreConfig` | `url` (Postgres), `max_connections` |
 | Processor | `ProcessorConfig` | `start_height`, `batch_size`, `reorg_retention` |
 | GraphQL | `GraphqlConfig` | `addr` (default `0.0.0.0:4350`), `path` (default `/graphql`) |

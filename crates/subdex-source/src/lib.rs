@@ -25,7 +25,8 @@
 
 mod config;
 mod mapping;
+mod retry;
 mod source;
 
-pub use config::{DataSelection, SourceConfig};
+pub use config::{DataSelection, RetryConfig, SourceConfig};
 pub use source::{ChainConfig, SubxtSource};

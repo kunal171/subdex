@@ -106,6 +106,15 @@ default both) controls what `map_block` fetches. An events-only indexer can set
 block `timestamp`, derived from the `Timestamp.set` extrinsic, is then `None`).
 The header is always fetched — its `parent_hash` is required for reorg-safety.
 
+**Retry + reconnect.** Direct RPC fails transiently — timeouts, dropped sockets,
+node restarts, rate-limits. Each network op (`finalized_head`, per-block fetch,
+`next_finalized`) is wrapped in `retry_async`, which retries **transient** errors
+(`SubdexError::Source`) with exponential backoff + jitter per `SourceConfig.retry`
+(`RetryConfig`, default 5 retries / 250ms→30s). Decode errors fail fast — retrying
+a genuine data bug won't help. When the finalized stream errors, the subscription
+is dropped so the retry **re-subscribes**, which is the reconnect path. So a single
+blip no longer aborts the run; only an exhausted budget does.
+
 ### Tests
 
 - Offline unit tests for the timestamp/value-walk helpers.
