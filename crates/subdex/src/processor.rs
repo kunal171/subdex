@@ -6,7 +6,10 @@
 
 use crate::config::ProcessorConfig;
 use std::sync::Arc;
-use subdex_core::{Block, BlockNumber, DataSource, Handler, Result, Store};
+use std::time::Instant;
+use subdex_core::{
+    Block, BlockNumber, DataSource, Handler, NoopObserver, ProcessorObserver, Result, Store,
+};
 
 /// The indexing engine. Generic over a concrete [`DataSource`] `Src` and
 /// [`Store`] `St`; holds a list of [`Handler`]s that share the store's
@@ -20,6 +23,9 @@ where
     store: St,
     handlers: Vec<Arc<dyn Handler<St>>>,
     config: ProcessorConfig,
+    /// Observability hook, called at key run-loop points. Defaults to the
+    /// zero-cost [`NoopObserver`]; set via [`with_observer`](Processor::with_observer).
+    observer: Arc<dyn ProcessorObserver>,
 }
 
 impl<Src, St> Processor<Src, St>
@@ -39,7 +45,16 @@ where
             store,
             handlers,
             config,
+            observer: Arc::new(NoopObserver),
         }
+    }
+
+    /// Attach an observability hook. The engine calls it at key run-loop points
+    /// (batch committed, reorg, new head, fetch, error) — for metrics, a progress
+    /// reporter, or a test spy. Without this the observer is a no-op.
+    pub fn with_observer(mut self, observer: Arc<dyn ProcessorObserver>) -> Self {
+        self.observer = observer;
+        self
     }
 
     /// Access the store (e.g. for tests / handler init).
@@ -90,12 +105,18 @@ where
     pub async fn backfill(&self) -> Result<BlockNumber> {
         let mut next = self.resume_height().await?;
         let head = self.source.finalized_head().await?;
+        self.observer.on_head(head);
 
         while next <= head {
             let to = next
                 .saturating_add(self.config.batch_size.saturating_sub(1))
                 .min(head);
-            let batch = self.source.fetch_batch(next, to).await?;
+            let fetch_start = Instant::now();
+            let batch = self.source.fetch_batch(next, to).await.inspect_err(|e| {
+                self.observer.on_error("fetch", &e.to_string());
+            })?;
+            self.observer
+                .on_fetch(batch.blocks.len(), fetch_start.elapsed());
             if batch.blocks.is_empty() {
                 // Source returned nothing for this window; avoid a busy spin.
                 break;
@@ -139,6 +160,10 @@ where
                 }
                 continue;
             }
+            // A new finalized tip: report it so observers can track head-lag.
+            if let Some(last) = batch.blocks.last() {
+                self.observer.on_head(last.id.number);
+            }
             // Commit the tip batch in one transaction (same path as backfill).
             // Reorgs are handled inside; on a reorg we simply continue — the next
             // stream batches re-deliver the corrected chain (the source drives
@@ -169,6 +194,10 @@ where
                 // Nothing new at the tip yet; loop and wait again (the select
                 // above will still observe shutdown).
                 continue;
+            }
+            // A new finalized tip: report it so observers can track head-lag.
+            if let Some(last) = batch.blocks.last() {
+                self.observer.on_head(last.id.number);
             }
             // Commit the tip batch in one transaction (reorg-aware).
             let _ = self.process_batch_blocks(&batch.blocks).await?;
@@ -248,7 +277,13 @@ where
             if let Some(stored_parent_hash) = self.store.hash_at(parent_height).await? {
                 if stored_parent_hash != first.parent_hash {
                     let fork = parent_height.saturating_sub(1);
+                    // Depth rolled back: from the current cursor down to the fork.
+                    let depth = match self.store.cursor().await? {
+                        Some(c) => c.number.saturating_sub(fork),
+                        None => 0,
+                    };
                     self.store.rollback_to(fork).await?;
+                    self.observer.on_reorg(fork, depth);
                     return Ok(Some(parent_height));
                 }
             }
@@ -266,10 +301,13 @@ where
         if blocks.is_empty() {
             return Ok(());
         }
+        let commit_start = Instant::now();
         let mut tx = self.store.begin().await?;
 
         for h in &self.handlers {
-            h.process_batch(blocks, &mut tx).await?;
+            h.process_batch(blocks, &mut tx)
+                .await
+                .inspect_err(|e| self.observer.on_error("handler", &e.to_string()))?;
         }
 
         // Record every block's hash (needed for reorg detection); the cursor
@@ -278,7 +316,16 @@ where
         for block in blocks {
             self.store.set_cursor(&mut tx, block).await?;
         }
-        self.store.commit(tx).await?;
+        self.store
+            .commit(tx)
+            .await
+            .inspect_err(|e| self.observer.on_error("commit", &e.to_string()))?;
+
+        // Notify: batch committed. Cursor is the last block; sum decoded events.
+        let cursor = blocks.last().map(|b| b.id.number).unwrap_or(0);
+        let events: usize = blocks.iter().map(|b| b.events.len()).sum();
+        self.observer
+            .on_batch_committed(cursor, blocks.len(), events, commit_start.elapsed());
         Ok(())
     }
 }
@@ -636,5 +683,117 @@ mod tests {
             4,
             "10 blocks / batch_size 3 = 4 batches (one txn each)"
         );
+    }
+
+    // --- Observer wiring ---
+
+    use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+
+    /// A spy observer recording what the engine reports.
+    #[derive(Default)]
+    struct SpyObserver {
+        batches: AtomicU32,
+        blocks: AtomicU64,
+        events: AtomicU64,
+        reorgs: AtomicU32,
+        last_reorg_depth: AtomicU32,
+        heads: AtomicU32,
+        last_head: AtomicU64,
+        fetches: AtomicU32,
+    }
+
+    impl subdex_core::ProcessorObserver for SpyObserver {
+        fn on_batch_committed(
+            &self,
+            cursor: BlockNumber,
+            count: usize,
+            events: usize,
+            _: std::time::Duration,
+        ) {
+            self.batches.fetch_add(1, Ordering::SeqCst);
+            self.blocks.fetch_add(count as u64, Ordering::SeqCst);
+            self.events.fetch_add(events as u64, Ordering::SeqCst);
+            self.last_head.fetch_max(cursor as u64, Ordering::SeqCst);
+        }
+        fn on_reorg(&self, _fork: BlockNumber, depth: u32) {
+            self.reorgs.fetch_add(1, Ordering::SeqCst);
+            self.last_reorg_depth.store(depth, Ordering::SeqCst);
+        }
+        fn on_head(&self, head: BlockNumber) {
+            self.heads.fetch_add(1, Ordering::SeqCst);
+            self.last_head.fetch_max(head as u64, Ordering::SeqCst);
+        }
+        fn on_fetch(&self, _count: usize, _elapsed: std::time::Duration) {
+            self.fetches.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test]
+    async fn observer_sees_backfill_batches_head_and_fetches() {
+        let spy = Arc::new(SpyObserver::default());
+        let p = processor_over(
+            test_chain(0, 10),
+            vec![Arc::new(RecordingHandler::new())],
+            ProcessorConfig::default().with_batch_size(3),
+        )
+        .with_observer(spy.clone());
+
+        p.backfill().await.unwrap();
+
+        // 10 blocks / batch 3 → 4 batches, 10 blocks total.
+        assert_eq!(
+            spy.batches.load(Ordering::SeqCst),
+            4,
+            "one per committed batch"
+        );
+        assert_eq!(spy.blocks.load(Ordering::SeqCst), 10, "all blocks reported");
+        assert_eq!(spy.fetches.load(Ordering::SeqCst), 4, "one fetch per batch");
+        assert!(
+            spy.heads.load(Ordering::SeqCst) >= 1,
+            "head reported at least once"
+        );
+        assert_eq!(
+            spy.last_head.load(Ordering::SeqCst),
+            9,
+            "head/cursor reached 9"
+        );
+    }
+
+    #[tokio::test]
+    async fn observer_sees_reorg_with_depth() {
+        let spy = Arc::new(SpyObserver::default());
+        let p = processor_with_observer(spy.clone());
+
+        // Index 1,2,3 on fork A.
+        for b in [
+            test_block(1, "0x1a", "0x0"),
+            test_block(2, "0x2a", "0x1a"),
+            test_block(3, "0x3a", "0x2a"),
+        ] {
+            p.process_batch_blocks(&[b]).await.unwrap();
+        }
+        // Fork B at height 3 whose parent (0x2b) != stored 0x2a → reorg.
+        // Cursor is at 3, fork point is height 1, so depth = 3 - 1 = 2.
+        let refetch = p
+            .process_batch_blocks(&[test_block(3, "0x3b", "0x2b")])
+            .await
+            .unwrap();
+        assert_eq!(refetch, Some(2));
+        assert_eq!(spy.reorgs.load(Ordering::SeqCst), 1, "one reorg observed");
+        assert_eq!(
+            spy.last_reorg_depth.load(Ordering::SeqCst),
+            2,
+            "rolled back 2 blocks"
+        );
+    }
+
+    fn processor_with_observer(obs: Arc<SpyObserver>) -> Processor<ScriptedSource, MemStore> {
+        Processor::new(
+            ScriptedSource::new(vec![]),
+            MemStore::new(),
+            vec![Arc::new(RecordingHandler::new())],
+            ProcessorConfig::default(),
+        )
+        .with_observer(obs)
     }
 }
