@@ -12,6 +12,16 @@ tokio.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 
+# Optional: Prometheus metrics observer + /metrics endpoint. Off by default;
+# enable with `--features metrics`.
+metrics = { workspace = true, optional = true }
+metrics-exporter-prometheus = { workspace = true, optional = true }
+
+[features]
+default = []
+# Ships PrometheusObserver + a /metrics HTTP endpoint (see src/metrics.rs).
+metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
+
 [dev-dependencies]
 tokio = { workspace = true }
 # End-to-end integration tests use the real source + store.
