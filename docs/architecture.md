@@ -167,6 +167,17 @@ live" phase; it runs until the process is stopped.
 Both phases route batches through the same `process_batch_blocks`, which is where
 the guarantees live.
 
+### Observability
+
+The engine holds an optional `Arc<dyn ProcessorObserver>` (a fourth, non-core
+seam) that it calls at each run-loop event — batch committed, reorg, new head,
+fetch, error. It defaults to a zero-cost `NoopObserver`, and is set via
+`Processor::with_observer`. This decouples the engine from any particular metrics
+or logging backend: the same hook drives a Prometheus exporter (the `metrics`
+feature's `PrometheusObserver`), a progress/ETA reporter, or a test spy, without
+the engine knowing which. Hooks are synchronous and expected to be cheap
+(a counter bump or channel send), so they don't slow the hot batch path.
+
 ---
 
 ## The guarantees, and how they're enforced

@@ -13,17 +13,23 @@
 //! - [`Store`] — owns the indexer cursor and reorg rollback, and hands handlers
 //!   a transaction so their writes commit atomically with the cursor.
 //!
+//! An optional [`ProcessorObserver`] hook lets consumers observe the run loop
+//! (batches, reorgs, head-lag, errors) for metrics or progress reporting, with a
+//! zero-cost [`NoopObserver`] default.
+//!
 //! This crate has no async-runtime or database dependencies; it only defines the
 //! contracts the other crates implement.
 
 pub mod error;
 pub mod handler;
+pub mod observer;
 pub mod source;
 pub mod store;
 pub mod types;
 
 pub use error::{Result, SubdexError};
 pub use handler::Handler;
+pub use observer::{NoopObserver, ProcessorObserver};
 pub use source::DataSource;
 pub use store::Store;
 pub use types::{Block, BlockBatch, BlockHash, BlockId, BlockNumber, Event, Extrinsic};

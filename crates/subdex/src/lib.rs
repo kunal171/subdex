@@ -20,6 +20,8 @@
 //! follow.
 
 mod config;
+#[cfg(feature = "metrics")]
+pub mod metrics;
 mod processor;
 #[cfg(test)]
 mod testkit;
@@ -27,8 +29,11 @@ mod testkit;
 pub use config::ProcessorConfig;
 pub use processor::Processor;
 
+#[cfg(feature = "metrics")]
+pub use metrics::{install_prometheus, PrometheusObserver};
+
 // Re-export the core contracts so users depend on a single crate.
 pub use subdex_core::{
-    Block, BlockBatch, BlockId, BlockNumber, DataSource, Event, Extrinsic, Handler, Result, Store,
-    SubdexError,
+    Block, BlockBatch, BlockId, BlockNumber, DataSource, Event, Extrinsic, Handler, NoopObserver,
+    ProcessorObserver, Result, Store, SubdexError,
 };

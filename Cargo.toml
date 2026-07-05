@@ -39,6 +39,10 @@ async-graphql = "7"
 async-graphql-axum = "7"
 axum = "0.8"
 
+# observability (optional — behind the `metrics` feature of the `subdex` crate)
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.18", default-features = false, features = ["http-listener"] }
+
 # serde / config
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

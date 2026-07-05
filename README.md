@@ -359,6 +359,51 @@ On GRANDPA chains the finalized cursor is clean and unambiguous.
 
 ---
 
+## Observability
+
+The engine exposes its run loop through a lightweight
+[`ProcessorObserver`](https://docs.rs/subdex) hook — a synchronous, backend-agnostic
+trait it calls at key points: `on_batch_committed` (cursor, block/event counts,
+commit time), `on_reorg` (fork height + depth), `on_head` (new finalized tip),
+`on_fetch` (fetch latency), and `on_error`. Every method has a no-op default, so
+the default [`NoopObserver`] costs nothing. Attach one with `.with_observer(...)`:
+
+```rust
+let processor = Processor::new(source, store, handlers, config)
+    .with_observer(my_observer); // Arc<dyn ProcessorObserver>
+```
+
+Use it for a progress/ETA reporter (the [`transfers`](./examples/transfers) and
+profile-indexer examples drive their progress logs this way), a test spy, or your
+own dashboard feed.
+
+### Prometheus metrics
+
+Enable the `metrics` feature for a ready-made Prometheus observer and a `/metrics`
+endpoint:
+
+```toml
+subdex = { version = "...", features = ["metrics"] }
+```
+
+```rust
+use subdex::{install_prometheus, PrometheusObserver};
+use std::sync::Arc;
+
+install_prometheus("0.0.0.0:9000".parse()?)?; // serves /metrics
+let processor = Processor::new(source, store, handlers, config)
+    .with_observer(Arc::new(PrometheusObserver::new()));
+```
+
+Exported series: `subdex_cursor_height`, `subdex_finalized_head`,
+`subdex_head_lag` (gauges); `subdex_blocks_processed_total`,
+`subdex_events_decoded_total`, `subdex_reorgs_total`, `subdex_errors_total`
+(counters); `subdex_reorg_depth`, `subdex_batch_commit_seconds`,
+`subdex_fetch_seconds` (histograms). The feature is off by default — no metrics
+dependencies are compiled unless you ask for them.
+
+---
+
 ## Testing
 
 ```bash
