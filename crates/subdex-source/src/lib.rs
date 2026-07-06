@@ -27,6 +27,11 @@ mod config;
 mod mapping;
 mod retry;
 mod source;
+#[cfg(feature = "sqd")]
+mod sqd;
 
 pub use config::{DataSelection, RetryConfig, SourceConfig};
 pub use source::{ChainConfig, SubxtSource};
+
+#[cfg(feature = "sqd")]
+pub use sqd::{SqdConfig, SqdPortalSource};

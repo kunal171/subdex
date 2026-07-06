@@ -15,5 +15,19 @@ scale-value.workspace = true
 tracing.workspace = true
 hex.workspace = true
 
+# Optional: SQD-portal DataSource (HTTP + JSON). Off by default; enable with
+# `--features sqd`. reqwest's `gzip` transparently decompresses the portal's
+# (optionally gzipped) JSON-lines response.
+reqwest = { workspace = true, optional = true, features = ["gzip"] }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[features]
+default = []
+# Ships SqdPortalSource: a fast historical-backfill DataSource over the SQD
+# (Subsquid) portal (see src/sqd/).
+sqd = ["dep:reqwest", "dep:serde", "dep:serde_json"]
+
 [dev-dependencies]
 tokio = { workspace = true }
+serde_json = { workspace = true }
