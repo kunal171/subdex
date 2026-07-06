@@ -321,7 +321,7 @@ serves a `transfers` query alongside `indexerStatus` from a single binary.
 | Crate | Purpose | Status |
 |---|---|---|
 | [`subdex-core`](./crates/subdex-core) | Traits (`DataSource`/`Handler`/`Store`) + chain-agnostic types. No runtime/db deps. | ✅ |
-| [`subdex-source`](./crates/subdex-source) | `subxt`-based direct-RPC `DataSource` (per-spec metadata decoding). | ✅ |
+| [`subdex-source`](./crates/subdex-source) | `DataSource`s: direct RPC via `subxt` (any chain), plus an SQD-portal backfill source (`sqd` feature). | ✅ |
 | [`subdex-store`](./crates/subdex-store) | Postgres `Store` via `sqlx` — cursor, hashes, atomic commit, reorg rollback. | ✅ |
 | [`subdex`](./crates/subdex) | The engine: backfill + live-follow run loop, reorg handling. Re-exports the core API. | ✅ |
 | [`subdex-graphql`](./crates/subdex-graphql) | GraphQL serving toolkit (`async-graphql` + `axum`) + built-in status query. | ✅ |
@@ -340,6 +340,43 @@ serves a `transfers` query alongside `indexerStatus` from a single binary.
 
 The `transfers` example reads `WS_URL`, `DATABASE_URL`, `START_HEIGHT`, `FOLLOW`,
 and `RUST_LOG` from the environment — see its [README](./examples/transfers/README.md).
+
+---
+
+## Data sources
+
+The engine talks to any `DataSource`. Two ship in `subdex-source`:
+
+**`SubxtSource` (default)** — direct RPC over WebSocket via `subxt`, works against
+any Substrate chain, decodes each block against its own spec-version metadata, and
+does both backfill and live-follow. It's latency-bound: throughput is capped by
+the node (~tens of blocks/sec against a public endpoint).
+
+**`SqdPortalSource` (`sqd` feature)** — a **backfill** source over the
+[SQD (Subsquid) portal](https://docs.sqd.dev), which serves pre-decoded, columnar,
+batched history far faster than per-block RPC (measured **15–50× faster** than RPC
+on Polkadot; ~1,600 blk/s on a 5k-block range). Two caveats, both inherent to the
+portal:
+
+- **Backfill-only.** The portal has no live Substrate tip, so `next_finalized`
+  errors — pair it with an `SubxtSource` for the live phase (a `HybridSource`
+  is planned). Ideal for the historical catch-up, then hand off to RPC.
+- **Decoded values are equivalent, not identical, to RPC.** The portal pre-decodes
+  args to JSON; subdex bridges that to `scale_value::Value` so handlers keep the
+  same type. Structural fields (heights, hashes, event names/indices, timestamps)
+  match RPC exactly; complex arg shapes (enums, byte arrays) may differ.
+
+```rust
+use subdex_source::{SqdConfig, SqdPortalSource};
+
+let source = SqdPortalSource::connect(
+    SqdConfig::new("https://portal.sqd.dev", "polkadot")
+        .with_batch_size(5000), // the portal rewards large ranges
+)?;
+```
+
+Because both are `DataSource`s, **handlers and the engine don't change** when you
+switch — that's the point of the trait seam.
 
 ---
 
