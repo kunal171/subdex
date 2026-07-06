@@ -37,12 +37,13 @@ pub(crate) struct PortalHeader {
     pub timestamp: Option<u64>,
 }
 
-/// Portal event. `args` is decoded JSON. `phase` distinguishes apply-extrinsic
-/// events from init/finalization ones; we surface `extrinsicIndex` directly.
+/// Portal event. `args` is decoded JSON (object or array). `phase` distinguishes
+/// apply-extrinsic events from init/finalization ones; we surface `extrinsicIndex`
+/// directly. The portal does **not** carry a per-block event index, so we derive
+/// it from the event's position in the block's array (matching the RPC source).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PortalEvent {
-    pub index: u32,
     #[serde(default)]
     pub extrinsic_index: Option<u32>,
     /// Fully-qualified `Pallet.Event`, e.g. `"Balances.Transfer"`.
@@ -52,10 +53,15 @@ pub(crate) struct PortalEvent {
 }
 
 /// Portal call (extrinsic). `args` is decoded JSON; `success` is provided.
+///
+/// `extrinsicIndex` is only present when the `extrinsic` field is also selected;
+/// with just the `call` selector the portal omits it, so it's optional and we
+/// fall back to the call's position in the block (matching the RPC source).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PortalCall {
-    pub extrinsic_index: u32,
+    #[serde(default)]
+    pub extrinsic_index: Option<u32>,
     /// Fully-qualified `Pallet.call`, e.g. `"Balances.transfer_keep_alive"`.
     pub name: String,
     #[serde(default = "default_true")]
@@ -166,10 +172,13 @@ pub(crate) fn map_block(pb: PortalBlock) -> Block {
     let events = pb
         .events
         .into_iter()
-        .map(|e| {
+        .enumerate()
+        .map(|(i, e)| {
             let (pallet, name) = split_qualified(&e.name);
             Event {
-                index: e.index,
+                // The portal carries no per-block event index; derive it from
+                // position (events are delivered in block order).
+                index: i as u32,
                 pallet,
                 name,
                 fields: json_to_value(&e.args),
@@ -181,11 +190,14 @@ pub(crate) fn map_block(pb: PortalBlock) -> Block {
     let extrinsics = pb
         .calls
         .into_iter()
-        .map(|c| {
+        .enumerate()
+        .map(|(i, c)| {
             let (pallet, call) = split_qualified(&c.name);
             let (signed, signer) = extract_signer(&c.origin);
             Extrinsic {
-                index: c.extrinsic_index,
+                // Prefer the portal's extrinsicIndex when present; else derive
+                // from position (calls are delivered in block order).
+                index: c.extrinsic_index.unwrap_or(i as u32),
                 pallet,
                 call,
                 args: json_to_value(&c.args),
@@ -271,9 +283,9 @@ mod tests {
             },
             "events": [
                 {
-                    "index": 3,
                     "extrinsicIndex": 2,
                     "name": "Balances.Transfer",
+                    "phase": "ApplyExtrinsic",
                     "args": { "from": "0x01", "to": "0x02", "amount": 500 }
                 }
             ],
@@ -301,7 +313,10 @@ mod tests {
         let ev = &b.events[0];
         assert_eq!(ev.pallet, "Balances");
         assert_eq!(ev.name, "Transfer");
-        assert_eq!(ev.index, 3);
+        assert_eq!(
+            ev.index, 0,
+            "derived from position (portal has no event index)"
+        );
         assert_eq!(ev.extrinsic_index, Some(2));
 
         assert_eq!(b.extrinsics.len(), 1);
