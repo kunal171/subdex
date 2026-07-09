@@ -14,6 +14,9 @@ for understanding **how it works** and **why it exists**.
    explanation of every crate, with references to the real code.
 4. **[Data Flow](./data-flow.md)** — a step-by-step trace of a single block from
    the chain all the way into Postgres and out via GraphQL.
+5. **[Design Decisions & History](./DESIGN-DECISIONS.md)** — the *why* behind the
+   design: decisions made, approaches tried, what failed, and what we switched to.
+   Read this before reworking a subsystem.
 
 ---
 
