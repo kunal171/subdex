@@ -99,7 +99,10 @@ mod tests {
         // Our prefix-42 output must be byte-identical to subxt's AccountId32
         // Display (which uses prefix 42), so switching in the mapping is safe.
         let acct = [0x11_u8; 32];
-        assert_eq!(encode(&acct, 42), subxt::utils::AccountId32(acct).to_string());
+        assert_eq!(
+            encode(&acct, 42),
+            subxt::utils::AccountId32(acct).to_string()
+        );
     }
 
     #[test]
@@ -108,7 +111,10 @@ mod tests {
         let sub = encode(&acct, 42); // Substrate
         let polkadot = encode(&acct, 0); // Polkadot (prefix 0 → starts '1')
         assert_ne!(sub, polkadot);
-        assert!(polkadot.starts_with('1'), "polkadot addr starts with 1: {polkadot}");
+        assert!(
+            polkadot.starts_with('1'),
+            "polkadot addr starts with 1: {polkadot}"
+        );
     }
 
     #[test]

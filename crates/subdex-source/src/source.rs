@@ -49,7 +49,13 @@ impl SubxtSource {
                 .at_block(height)
                 .await
                 .map_err(|e| SubdexError::Source(format!("at_block {height}: {e}")))?;
-            map_block(&at, finalized, self.config.selection, self.config.ss58_prefix).await
+            map_block(
+                &at,
+                finalized,
+                self.config.selection,
+                self.config.ss58_prefix,
+            )
+            .await
         })
         .await
     }

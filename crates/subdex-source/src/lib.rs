@@ -27,9 +27,9 @@ mod config;
 mod mapping;
 mod retry;
 mod source;
-mod ss58;
 #[cfg(feature = "sqd")]
 mod sqd;
+mod ss58;
 
 pub use config::{DataSelection, RetryConfig, SourceConfig};
 pub use source::{ChainConfig, SubxtSource};

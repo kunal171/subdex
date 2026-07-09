@@ -134,13 +134,27 @@ pub(crate) fn json_to_value(json: &serde_json::Value) -> Value {
 /// origins are commonly `{ "__kind": "Signed", "value": "0x…" }` or nested under
 /// a `value` key. We pull the first **address-looking** string (starts with
 /// `0x`), skipping variant tags like `"Signed"`.
-fn extract_signer(origin: &Option<serde_json::Value>) -> (bool, Option<String>) {
+///
+/// When that address is a 32-byte hex account, it's rendered as an SS58 address
+/// with `ss58_prefix` — consistent with the RPC source. A non-account or
+/// non-hex string is kept as-is; anything else falls back to the first string.
+fn extract_signer(origin: &Option<serde_json::Value>, ss58_prefix: u16) -> (bool, Option<String>) {
     let Some(origin) = origin else {
         return (false, None);
     };
     // Origin present ⇒ signed. Try for an address; fall back to any string.
-    let addr = first_address(origin).or_else(|| first_string(origin));
+    let raw = first_address(origin).or_else(|| first_string(origin));
+    let addr = raw.map(|s| ss58_from_hex_account(&s, ss58_prefix).unwrap_or(s));
     (true, addr)
+}
+
+/// If `s` is a `0x`-prefixed 32-byte hex account, return its SS58 encoding;
+/// otherwise `None` (caller keeps the original string).
+fn ss58_from_hex_account(s: &str, prefix: u16) -> Option<String> {
+    let hex = s.strip_prefix("0x")?;
+    let bytes = hex::decode(hex).ok()?;
+    let account: [u8; 32] = bytes.try_into().ok()?;
+    Some(crate::ss58::encode(&account, prefix))
 }
 
 /// Find the first `0x…`-prefixed string in a JSON value (depth-first) — the
@@ -167,8 +181,9 @@ fn first_string(json: &serde_json::Value) -> Option<String> {
     }
 }
 
-/// Convert one [`PortalBlock`] into the framework's [`Block`].
-pub(crate) fn map_block(pb: PortalBlock) -> Block {
+/// Convert one [`PortalBlock`] into the framework's [`Block`]. `ss58_prefix`
+/// renders a signed call's account origin as an SS58 address (default 42).
+pub(crate) fn map_block(pb: PortalBlock, ss58_prefix: u16) -> Block {
     let events = pb
         .events
         .into_iter()
@@ -193,7 +208,7 @@ pub(crate) fn map_block(pb: PortalBlock) -> Block {
         .enumerate()
         .map(|(i, c)| {
             let (pallet, call) = split_qualified(&c.name);
-            let (signed, signer) = extract_signer(&c.origin);
+            let (signed, signer) = extract_signer(&c.origin, ss58_prefix);
             Extrinsic {
                 // Prefer the portal's extrinsicIndex when present; else derive
                 // from position (calls are delivered in block order).
@@ -300,7 +315,7 @@ mod tests {
             ]
         });
         let pb: PortalBlock = serde_json::from_value(json).unwrap();
-        let b = map_block(pb);
+        let b = map_block(pb, 42);
 
         assert_eq!(b.id.number, 100);
         assert_eq!(b.id.hash, "0xaaa");
@@ -326,8 +341,32 @@ mod tests {
         assert_eq!(ext.index, 2);
         assert!(ext.success);
         assert!(ext.signed);
-        // The 0x-prefixed address is picked, not the "Signed" variant tag.
+        // The 0x-prefixed address is picked (not the "Signed" tag); it's not a
+        // 32-byte account, so it stays as the raw hex string.
         assert_eq!(ext.signer.as_deref(), Some("0x01"));
+    }
+
+    #[test]
+    fn signer_32byte_hex_origin_becomes_ss58() {
+        // A signed call whose origin carries a full 32-byte hex account is
+        // rendered as an SS58 address (prefix 42 → starts '5'), consistent with
+        // the RPC source.
+        let acct_hex = format!("0x{}", "ab".repeat(32)); // 32 bytes
+        let json = serde_json::json!({
+            "header": { "number": 5, "hash": "0x5", "parentHash": "0x4" },
+            "calls": [{
+                "extrinsicIndex": 0,
+                "name": "Balances.transfer",
+                "origin": { "__kind": "Signed", "value": acct_hex }
+            }]
+        });
+        let pb: PortalBlock = serde_json::from_value(json).unwrap();
+        let b = map_block(pb, 42);
+        let signer = b.extrinsics[0].signer.as_deref().unwrap();
+        assert!(signer.starts_with('5'), "expected SS58, got {signer}");
+        // Round-trips back to the same 32 bytes.
+        let decoded: subxt::utils::AccountId32 = signer.parse().unwrap();
+        assert_eq!(decoded.0, [0xab; 32]);
     }
 
     #[test]
@@ -337,7 +376,7 @@ mod tests {
             "calls": [ { "extrinsicIndex": 0, "name": "Timestamp.set", "args": { "now": 1 } } ]
         });
         let pb: PortalBlock = serde_json::from_value(json).unwrap();
-        let b = map_block(pb);
+        let b = map_block(pb, 42);
         assert!(!b.extrinsics[0].signed);
         assert_eq!(b.extrinsics[0].signer, None);
     }
@@ -349,7 +388,7 @@ mod tests {
             "events": [ { "index": 0, "name": "System.ExtrinsicSuccess", "args": {} } ]
         });
         let pb: PortalBlock = serde_json::from_value(json).unwrap();
-        let b = map_block(pb);
+        let b = map_block(pb, 42);
         assert_eq!(b.events.len(), 1);
         assert!(b.extrinsics.is_empty());
         assert_eq!(b.spec_version, 0, "defaulted when absent");

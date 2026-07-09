@@ -111,10 +111,12 @@ where
         // 32-byte account (the common MultiAddress::Id case). Fall back to raw
         // hex for shapes we can't map to an AccountId32 (Index, Address20, …), so
         // an unusual address never panics or silently drops the signer.
-        let signer = ext.address_bytes().map(|b| match ss58::account_from_address_bytes(b) {
-            Some(account) => ss58::encode(&account, ss58_prefix),
-            None => format!("0x{}", hex::encode(b)),
-        });
+        let signer = ext
+            .address_bytes()
+            .map(|b| match ss58::account_from_address_bytes(b) {
+                Some(account) => ss58::encode(&account, ss58_prefix),
+                None => format!("0x{}", hex::encode(b)),
+            });
 
         out.push(Extrinsic {
             index,
