@@ -51,13 +51,23 @@ jobs:
       - name: Lints (cargo clippy -D warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Also lint with every feature enabled so opt-in, feature-gated code
+      # (e.g. `sqd`, `metrics`) is checked — the default run above compiles none
+      # of it.
+      - name: Lints — all features (cargo clippy -D warnings)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
       - name: Docs (cargo doc -D warnings; catches broken intra-doc links)
-        run: cargo doc --workspace --no-deps
+        run: cargo doc --workspace --no-deps --all-features
         env:
           RUSTDOCFLAGS: "-D warnings"
 
       - name: Tests (offline; #[ignore]d network/DB tests are skipped)
         run: cargo test --workspace
+
+      # Re-run tests with every feature on so feature-gated unit tests run too.
+      - name: Tests — all features (offline)
+        run: cargo test --workspace --all-features
 
   # Database-gated integration tests: spin up Postgres and run the #[ignore]d
   # tests that need a real database (store lifecycle, GraphQL-over-HTTP).
