@@ -24,6 +24,19 @@ pub enum SubdexError {
         got: String,
     },
 
+    /// A reorg's true common ancestor is deeper than the configured
+    /// `max_reorg_depth`. On a finalized-block indexer this signals a
+    /// misconfiguration (e.g. a non-finalized source), not a real fork, so the
+    /// processor refuses to rewind further.
+    #[error(
+        "reorg too deep: fork is at least {depth} blocks below the cursor \
+         (max_reorg_depth = {max})"
+    )]
+    ReorgTooDeep {
+        depth: crate::types::BlockNumber,
+        max: u32,
+    },
+
     #[error("handler error: {0}")]
     Handler(String),
 

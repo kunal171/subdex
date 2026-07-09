@@ -335,7 +335,7 @@ serves a `transfers` query alongside `indexerStatus` from a single binary.
 |---|---|---|
 | Source | `SourceConfig` | `url` (WSS endpoint), `batch_size`, `concurrency`, `selection` (`DataSelection` — fetch only events/extrinsics you need), `retry` (`RetryConfig` — transient-failure backoff) |
 | Store | `StoreConfig` | `url` (Postgres), `max_connections` |
-| Processor | `ProcessorConfig` | `start_height`, `batch_size`, `reorg_retention` |
+| Processor | `ProcessorConfig` | `start_height`, `batch_size`, `reorg_retention`, `max_reorg_depth` (bound the rewind on a reorg; `0` = unbounded) |
 | GraphQL | `GraphqlConfig` | `addr` (default `0.0.0.0:4350`), `path` (default `/graphql`) |
 
 The `transfers` example reads `WS_URL`, `DATABASE_URL`, `START_HEIGHT`, `FOLLOW`,
@@ -387,8 +387,11 @@ block it validates that the block's `parent_hash` matches the hash stored for th
 previous height:
 
 - **Match** → commit normally (handler writes + cursor advance, atomically).
-- **Mismatch** → a reorg replaced the parent; the store rolls back the diverged
-  tail and the processor re-fetches the corrected chain from the fork point.
+- **Mismatch** → a reorg replaced the parent; the processor walks down to the
+  **true common ancestor** (comparing stored hashes against the source's canonical
+  hashes), rolls back the diverged tail in one pass, and re-fetches from the fork
+  point. The rewind is bounded by `max_reorg_depth` (default 64; `0` = unbounded) —
+  a deeper fork errors rather than rewinding unboundedly.
 
 Because subdex indexes finalized blocks, deep reorgs are not expected; the
 parent-hash check protects against any divergence within the retained window.

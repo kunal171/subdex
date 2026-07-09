@@ -218,8 +218,23 @@ equal the hash we stored for height `N-1`?
 
 - **Yes** (or we have no record of `N-1` — it's the first block, or below the
   retained window) → commit normally.
-- **No** → a reorg replaced our parent. The store **rolls back** everything above
-  the fork point, and the engine re-fetches the corrected chain from there.
+- **No** → a reorg replaced our parent. The engine finds the **true common
+  ancestor** and rolls back everything above it in one pass, then re-fetches the
+  corrected chain from there.
+
+**Finding the fork point.** Rather than assume the fork is exactly one block back,
+`find_fork_point` walks **down** from the divergent height, comparing the hash we
+stored at each height against the source's canonical hash there, until they agree —
+that height is the true ancestor. The first comparison is free (the incoming
+block's `parent_hash` *is* the canonical hash at the parent height), so a 1-block
+reorg needs no extra fetch; deeper divergence costs one single-block fetch per
+level, done in a tight loop up front instead of one engine iteration per level.
+
+**Bounded depth.** The walk is capped by `max_reorg_depth` (default 64; `0` =
+unbounded). A fork deeper than that below the cursor is a hard error
+(`ReorgTooDeep`) rather than an unbounded rewind — on a finalized-block indexer,
+that much depth signals a misconfiguration (e.g. a non-finalized source), not a
+real fork.
 
 This keeps the database consistent with the canonical chain even when the chain
 reorganizes under us. Because subdex indexes **finalized** blocks, deep reorgs

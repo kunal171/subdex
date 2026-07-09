@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use subdex_core::{
     Block, BlockNumber, DataSource, Handler, NoopObserver, ProcessorObserver, Result, Store,
+    SubdexError,
 };
 
 /// The indexing engine. Generic over a concrete [`DataSource`] `Src` and
@@ -226,12 +227,19 @@ where
             let parent_height = block.id.number - 1;
             if let Some(stored_parent_hash) = self.store.hash_at(parent_height).await? {
                 if stored_parent_hash != block.parent_hash {
-                    // Reorg: our stored parent differs from this block's parent.
-                    // Drop the diverged parent and everything above it, then ask
-                    // the caller to re-index starting at the parent height.
-                    let fork = parent_height.saturating_sub(1);
+                    // Reorg: walk to the true common ancestor (same as the batch
+                    // path), roll back once, and ask the caller to re-index from
+                    // the fork onward.
+                    let fork = self
+                        .find_fork_point(parent_height, &block.parent_hash)
+                        .await?;
+                    let depth = match self.store.cursor().await? {
+                        Some(c) => c.number.saturating_sub(fork),
+                        None => 0,
+                    };
                     self.store.rollback_to(fork).await?;
-                    return Ok(Some(parent_height));
+                    self.observer.on_reorg(fork, depth);
+                    return Ok(Some(fork.saturating_add(1)));
                 }
             }
         }
@@ -276,21 +284,102 @@ where
             let parent_height = first.id.number - 1;
             if let Some(stored_parent_hash) = self.store.hash_at(parent_height).await? {
                 if stored_parent_hash != first.parent_hash {
-                    let fork = parent_height.saturating_sub(1);
-                    // Depth rolled back: from the current cursor down to the fork.
+                    // The chains diverge at or below `parent_height`. Walk down to
+                    // the TRUE common ancestor in one pass (rather than rewinding
+                    // one block per engine iteration), roll back once to it, and
+                    // ask the caller to re-fetch the corrected chain from there.
+                    //
+                    // We already know the canonical hash at `parent_height`: it's
+                    // the incoming block's stated parent (`first.parent_hash`), so
+                    // the first comparison needs no source fetch — a 1-block reorg
+                    // (the common case) resolves without any extra round-trip.
+                    let fork = self
+                        .find_fork_point(parent_height, &first.parent_hash)
+                        .await?;
                     let depth = match self.store.cursor().await? {
                         Some(c) => c.number.saturating_sub(fork),
                         None => 0,
                     };
                     self.store.rollback_to(fork).await?;
                     self.observer.on_reorg(fork, depth);
-                    return Ok(Some(parent_height));
+                    return Ok(Some(fork.saturating_add(1)));
                 }
             }
         }
 
         self.commit_batch(blocks).await?;
         Ok(None)
+    }
+
+    /// Find the true common ancestor of our stored chain and the source's
+    /// canonical chain, given that they already disagree at `diverged_height`.
+    ///
+    /// Walks **down** from `diverged_height`: at each height it compares the hash
+    /// we stored against the source's canonical hash there. The first height where
+    /// they **agree** is the fork point — everything above it is rolled back. If we
+    /// reach a height we have no stored hash for (below the retained window, or
+    /// height 0), that height is the ancestor (nothing above it to trust).
+    ///
+    /// Bounded by `config.max_reorg_depth`: if the ancestor is more than that many
+    /// blocks below the cursor, returns [`SubdexError::ReorgTooDeep`] rather than
+    /// rewinding further — such depth on a finalized indexer signals a
+    /// misconfiguration, not a genuine fork. `max_reorg_depth == 0` disables the
+    /// bound.
+    ///
+    /// `known_canonical` is the source's canonical hash at `diverged_height` (the
+    /// incoming block's `parent_hash`), so the first comparison is free; only if
+    /// the divergence runs deeper do we fetch canonical hashes from the source.
+    async fn find_fork_point(
+        &self,
+        diverged_height: BlockNumber,
+        known_canonical: &str,
+    ) -> Result<BlockNumber> {
+        let cursor = self.store.cursor().await?.map(|c| c.number).unwrap_or(0);
+        let max = self.config.max_reorg_depth;
+
+        let mut height = diverged_height;
+        let mut canonical_at_height = known_canonical.to_string();
+        loop {
+            // Enforce the depth bound (0 = unbounded).
+            let depth = cursor.saturating_sub(height);
+            if max != 0 && depth > max {
+                return Err(SubdexError::ReorgTooDeep { depth, max });
+            }
+
+            // No stored hash here → below the retained window (or genesis): treat
+            // this height as the ancestor. We can't roll back into unknown ground.
+            let Some(stored) = self.store.hash_at(height).await? else {
+                return Ok(height);
+            };
+
+            if stored == canonical_at_height {
+                // Agreement: `height` is on both chains → the fork point.
+                return Ok(height);
+            }
+
+            if height == 0 {
+                // Diverged all the way to genesis (shouldn't happen on a real
+                // chain, but don't underflow): genesis is the ancestor.
+                return Ok(0);
+            }
+
+            // Still diverging: fetch the canonical block at the next height down so
+            // the loop can compare it against our stored hash there.
+            height -= 1;
+            canonical_at_height = self.canonical_hash_at(height).await?;
+        }
+    }
+
+    /// The source's canonical block hash at `height` (a single-block fetch).
+    async fn canonical_hash_at(&self, height: BlockNumber) -> Result<String> {
+        let batch = self.source.fetch_batch(height, height).await?;
+        batch
+            .blocks
+            .first()
+            .map(|b| b.id.hash.clone())
+            .ok_or_else(|| {
+                SubdexError::Source(format!("source returned no block at height {height}"))
+            })
     }
 
     /// Commit a batch of blocks atomically: open ONE transaction, run every
@@ -446,8 +535,16 @@ mod tests {
 
     #[tokio::test]
     async fn process_block_detects_reorg_and_rolls_back() {
+        // Single-block path: same walk-to-ancestor behaviour as the batch path.
+        // Fork B (canonical, served by the source) diverges at height 2, so the
+        // true ancestor is height 1.
+        let fork_b = vec![
+            test_block(1, "0x1a", "0x0"),
+            test_block(2, "0x2b", "0x1a"),
+            test_block(3, "0x3b", "0x2b"),
+        ];
         let h = Arc::new(RecordingHandler::new());
-        let p = processor_with(vec![h.clone()]);
+        let p = processor_over(fork_b, vec![h.clone()], ProcessorConfig::default());
 
         // Index a chain 1,2,3 on fork A.
         for b in [
@@ -460,16 +557,12 @@ mod tests {
         assert_eq!(p.store().len(), 3);
 
         // Now a block 3 arrives on fork B whose parent (0x2b) != stored 0x2a.
-        // Reorg: roll back to fork point (height 1) and ask to refetch from 2.
+        // Reorg: walk to the true fork (height 1) and ask to refetch from 2.
         let refetch = p
             .process_block(&test_block(3, "0x3b", "0x2b"))
             .await
             .unwrap();
-        assert_eq!(
-            refetch,
-            Some(2),
-            "caller should re-fetch from the parent height"
-        );
+        assert_eq!(refetch, Some(2), "caller should re-fetch from fork + 1");
 
         // Heights 2 and 3 (the diverged tail) are dropped; height 1 retained.
         assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 1);
@@ -638,31 +731,108 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn process_batch_blocks_detects_reorg_at_batch_boundary() {
+    async fn no_reorg_when_parent_matches_needs_no_source() {
+        // The common path: an incoming block whose parent matches the stored hash
+        // commits normally with no reorg walk and no source fetch (the source here
+        // is empty, proving no canonical-hash lookup happens).
         let h = Arc::new(RecordingHandler::new());
         let p = processor_with(vec![h.clone()]);
 
-        // Index chain 1,2,3 on fork A.
-        assert_eq!(
-            p.process_batch_blocks(&[
-                test_block(1, "0x1a", "0x0"),
-                test_block(2, "0x2a", "0x1a"),
-                test_block(3, "0x3a", "0x2a"),
-            ])
-            .await
-            .unwrap(),
-            None
-        );
-        assert_eq!(p.store().len(), 3);
-
-        // A new batch starting at height 3 on fork B: parent (0x2b) != stored
-        // 0x2a → reorg. Roll back to fork (height 1), refetch from 2.
-        let refetch = p
-            .process_batch_blocks(&[test_block(3, "0x3b", "0x2b")])
+        p.process_batch_blocks(&[test_block(1, "0x1a", "0x0"), test_block(2, "0x2a", "0x1a")])
             .await
             .unwrap();
-        assert_eq!(refetch, Some(2));
-        assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 1);
+        let refetch = p
+            .process_batch_blocks(&[test_block(3, "0x3a", "0x2a")])
+            .await
+            .unwrap();
+        assert_eq!(refetch, None, "matching parent → no reorg, no fetch");
+        assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 3);
+    }
+
+    #[tokio::test]
+    async fn process_batch_blocks_walks_to_true_ancestor_deep_reorg() {
+        // Acceptance criterion: a 3-block-deep reorg resolves in a SINGLE rollback
+        // to the true common ancestor, using the source to walk down.
+        //
+        // Fork A (indexed):    1a 2a 3a 4a   (parents chain from 0x0)
+        // Fork B (canonical):  1a 2b 3b 4b   → diverges at height 2; ancestor = 1.
+        // The source serves fork B so the walk can compare canonical hashes.
+        let fork_b = vec![
+            test_block(1, "0x1a", "0x0"), // shared with fork A
+            test_block(2, "0x2b", "0x1a"),
+            test_block(3, "0x3b", "0x2b"),
+            test_block(4, "0x4b", "0x3b"),
+        ];
+        let h = Arc::new(RecordingHandler::new());
+        let p = processor_over(fork_b, vec![h.clone()], ProcessorConfig::default());
+
+        // Index fork A: 1a 2a 3a 4a.
+        p.process_batch_blocks(&[
+            test_block(1, "0x1a", "0x0"),
+            test_block(2, "0x2a", "0x1a"),
+            test_block(3, "0x3a", "0x2a"),
+            test_block(4, "0x4a", "0x3a"),
+        ])
+        .await
+        .unwrap();
+        assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 4);
+
+        // Now fork B's block 4 arrives (parent 0x3b). Its parent height 3 stored
+        // 0x3a ≠ 0x3b → reorg. Walk: h3 (stored 0x3a vs canonical 0x3b) differ →
+        // h2 (stored 0x2a vs canonical 0x2b) differ → h1 (stored 0x1a vs canonical
+        // 0x1a) AGREE. Fork = 1. ONE rollback to 1; refetch from 2.
+        let refetch = p
+            .process_batch_blocks(&[test_block(4, "0x4b", "0x3b")])
+            .await
+            .unwrap();
+        assert_eq!(refetch, Some(2), "refetch from fork+1");
+        assert_eq!(
+            p.store().cursor().await.unwrap().unwrap().number,
+            1,
+            "rolled back to the true ancestor (height 1) in one pass"
+        );
+        // Heights 2,3,4 dropped; 1 retained.
+        assert!(p.store().hash_at(1).await.unwrap().is_some());
+        assert!(p.store().hash_at(2).await.unwrap().is_none());
+        assert!(p.store().hash_at(4).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn reorg_deeper_than_max_depth_errors() {
+        // Fork B diverges 3 blocks back; with max_reorg_depth = 1, the walk must
+        // stop and error rather than rewinding further.
+        let fork_b = vec![
+            test_block(1, "0x1a", "0x0"),
+            test_block(2, "0x2b", "0x1a"),
+            test_block(3, "0x3b", "0x2b"),
+        ];
+        let h = Arc::new(RecordingHandler::new());
+        let p = processor_over(
+            fork_b,
+            vec![h.clone()],
+            ProcessorConfig::default().with_max_reorg_depth(1),
+        );
+
+        // Index fork A: 1a 2a 3a (cursor 3).
+        p.process_batch_blocks(&[
+            test_block(1, "0x1a", "0x0"),
+            test_block(2, "0x2a", "0x1a"),
+            test_block(3, "0x3a", "0x2a"),
+        ])
+        .await
+        .unwrap();
+
+        // Fork B block 3 (parent 0x2b): the true fork is height 1 (depth 2 from
+        // cursor 3), which exceeds max_reorg_depth = 1 → hard error.
+        let err = p
+            .process_batch_blocks(&[test_block(3, "0x3b", "0x2b")])
+            .await;
+        assert!(
+            matches!(err, Err(subdex_core::SubdexError::ReorgTooDeep { .. })),
+            "expected ReorgTooDeep, got {err:?}"
+        );
+        // Nothing rolled back: the cursor is untouched on the error.
+        assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 3);
     }
 
     #[tokio::test]
@@ -762,7 +932,13 @@ mod tests {
     #[tokio::test]
     async fn observer_sees_reorg_with_depth() {
         let spy = Arc::new(SpyObserver::default());
-        let p = processor_with_observer(spy.clone());
+        // Source serves fork B so the depth-2 walk can compare canonical hashes.
+        let fork_b = vec![
+            test_block(1, "0x1a", "0x0"),
+            test_block(2, "0x2b", "0x1a"),
+            test_block(3, "0x3b", "0x2b"),
+        ];
+        let p = processor_with_observer(fork_b, spy.clone());
 
         // Index 1,2,3 on fork A.
         for b in [
@@ -772,8 +948,8 @@ mod tests {
         ] {
             p.process_batch_blocks(&[b]).await.unwrap();
         }
-        // Fork B at height 3 whose parent (0x2b) != stored 0x2a → reorg.
-        // Cursor is at 3, fork point is height 1, so depth = 3 - 1 = 2.
+        // Fork B block 3 (parent 0x2b) → reorg. True fork is height 1 (grandparent
+        // agrees), so depth = cursor(3) - 1 = 2.
         let refetch = p
             .process_batch_blocks(&[test_block(3, "0x3b", "0x2b")])
             .await
@@ -783,13 +959,16 @@ mod tests {
         assert_eq!(
             spy.last_reorg_depth.load(Ordering::SeqCst),
             2,
-            "rolled back 2 blocks"
+            "rolled back 2 blocks (to the true ancestor at height 1)"
         );
     }
 
-    fn processor_with_observer(obs: Arc<SpyObserver>) -> Processor<ScriptedSource, MemStore> {
+    fn processor_with_observer(
+        source_blocks: Vec<Block>,
+        obs: Arc<SpyObserver>,
+    ) -> Processor<ScriptedSource, MemStore> {
         Processor::new(
-            ScriptedSource::new(vec![]),
+            ScriptedSource::new(source_blocks),
             MemStore::new(),
             vec![Arc::new(RecordingHandler::new())],
             ProcessorConfig::default(),
