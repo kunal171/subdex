@@ -128,11 +128,16 @@ pub struct SourceConfig {
     /// Retry-with-backoff policy for transient RPC failures. Defaults to
     /// [`RetryConfig::default`]; use [`RetryConfig::disabled`] to fail fast.
     pub retry: RetryConfig,
+    /// SS58 network prefix used to render a signed extrinsic's `signer` as a
+    /// canonical `5…`-style address. Defaults to **42** (the generic Substrate
+    /// prefix); set your chain's prefix (e.g. 0 for Polkadot, 2 for Kusama) for
+    /// addresses that match block explorers.
+    pub ss58_prefix: u16,
 }
 
 impl SourceConfig {
     /// Create a config for `url` with sensible defaults (batch size 100,
-    /// concurrency 16, fetch everything).
+    /// concurrency 16, fetch everything, SS58 prefix 42).
     pub fn new(url: impl Into<String>) -> Self {
         Self {
             url: url.into(),
@@ -140,6 +145,7 @@ impl SourceConfig {
             concurrency: 16,
             selection: DataSelection::default(),
             retry: RetryConfig::default(),
+            ss58_prefix: 42,
         }
     }
 
@@ -166,6 +172,13 @@ impl SourceConfig {
     /// (floored at 1).
     pub fn with_concurrency(mut self, concurrency: usize) -> Self {
         self.concurrency = concurrency.max(1);
+        self
+    }
+
+    /// Override the SS58 network prefix used to render signer addresses
+    /// (default 42; e.g. 0 for Polkadot, 2 for Kusama).
+    pub fn with_ss58_prefix(mut self, prefix: u16) -> Self {
+        self.ss58_prefix = prefix;
         self
     }
 }

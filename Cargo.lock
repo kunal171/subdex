@@ -4210,6 +4210,8 @@ name = "subdex-source"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base58",
+ "blake2",
  "futures",
  "hex",
  "reqwest",

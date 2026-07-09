@@ -27,6 +27,7 @@ mod config;
 mod mapping;
 mod retry;
 mod source;
+mod ss58;
 #[cfg(feature = "sqd")]
 mod sqd;
 
