@@ -17,6 +17,14 @@ pub struct ProcessorConfig {
     /// (they are assumed impossible below finality). `0` means "retain all"
     /// (no pruning). Defaults to 0 until the processor implements pruning.
     pub reorg_retention: u32,
+    /// Maximum depth (in blocks) a reorg may rewind before the processor treats
+    /// it as a hard error rather than rolling back further. On a reorg the engine
+    /// walks back to the true common ancestor; if that ancestor is more than
+    /// `max_reorg_depth` blocks below the cursor, it errors instead of rewinding —
+    /// such depth on a finalized-block indexer signals a misconfiguration (e.g. a
+    /// non-finalized source) rather than a real fork. `0` means unbounded (never
+    /// error on depth). Defaults to 64.
+    pub max_reorg_depth: u32,
 }
 
 impl Default for ProcessorConfig {
@@ -25,6 +33,7 @@ impl Default for ProcessorConfig {
             start_height: 0,
             batch_size: 100,
             reorg_retention: 0,
+            max_reorg_depth: 64,
         }
     }
 }
@@ -43,6 +52,12 @@ impl ProcessorConfig {
         self.batch_size = batch_size.max(1);
         self
     }
+
+    /// Override the maximum reorg depth (`0` = unbounded).
+    pub fn with_max_reorg_depth(mut self, max_reorg_depth: u32) -> Self {
+        self.max_reorg_depth = max_reorg_depth;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -55,12 +70,16 @@ mod tests {
         assert_eq!(c.start_height, 0);
         assert_eq!(c.batch_size, 100);
         assert_eq!(c.reorg_retention, 0);
+        assert_eq!(c.max_reorg_depth, 64);
     }
 
     #[test]
     fn builders() {
-        let c = ProcessorConfig::from_height(500).with_batch_size(0);
+        let c = ProcessorConfig::from_height(500)
+            .with_batch_size(0)
+            .with_max_reorg_depth(0);
         assert_eq!(c.start_height, 500);
         assert_eq!(c.batch_size, 1, "batch size floored at 1");
+        assert_eq!(c.max_reorg_depth, 0, "0 = unbounded");
     }
 }
