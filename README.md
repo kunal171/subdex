@@ -333,7 +333,7 @@ serves a `transfers` query alongside `indexerStatus` from a single binary.
 
 | Component | Type | Key options |
 |---|---|---|
-| Source | `SourceConfig` | `url` (WSS endpoint), `batch_size`, `concurrency`, `selection` (`DataSelection` — fetch only events/extrinsics you need), `retry` (`RetryConfig` — transient-failure backoff), `ss58_prefix` (signer address prefix, default 42) |
+| Source | `SourceConfig` | `url` (WSS endpoint), `batch_size`, `concurrency`, `selection` (`DataSelection` — fetch only events/extrinsics you need), `retry` (`RetryConfig` — transient-failure backoff), `ss58_prefix` (signer address prefix, default 42), `strict` (make per-item decode failures hard errors; default off) |
 | Store | `StoreConfig` | `url` (Postgres), `max_connections` |
 | Processor | `ProcessorConfig` | `start_height`, `batch_size`, `reorg_retention`, `max_reorg_depth` (bound the rewind on a reorg; `0` = unbounded) |
 | GraphQL | `GraphqlConfig` | `addr` (default `0.0.0.0:4350`), `path` (default `/graphql`) |
@@ -437,10 +437,16 @@ let processor = Processor::new(source, store, handlers, config)
 
 Exported series: `subdex_cursor_height`, `subdex_finalized_head`,
 `subdex_head_lag` (gauges); `subdex_blocks_processed_total`,
-`subdex_events_decoded_total`, `subdex_reorgs_total`, `subdex_errors_total`
-(counters); `subdex_reorg_depth`, `subdex_batch_commit_seconds`,
-`subdex_fetch_seconds` (histograms). The feature is off by default — no metrics
-dependencies are compiled unless you ask for them.
+`subdex_events_decoded_total`, `subdex_reorgs_total`, `subdex_errors_total`,
+`subdex_decode_failures_total` (counters); `subdex_reorg_depth`,
+`subdex_batch_commit_seconds`, `subdex_fetch_seconds` (histograms). The feature is
+off by default — no metrics dependencies are compiled unless you ask for them.
+
+> The source emits `subdex_decode_failures_total` (labelled by `kind`/`pallet`)
+> whenever an event's fields or an extrinsic's args fail to decode. By default the
+> item is recorded with an empty value and indexing continues; set
+> `SourceConfig.strict` to make such a failure a hard error instead (useful in CI
+> to catch metadata drift rather than silently write empty data).
 
 ---
 

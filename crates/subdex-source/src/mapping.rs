@@ -19,6 +19,46 @@ use subxt::events::Phase;
 /// [`subdex_core::Event::fields`] / [`subdex_core::Extrinsic::args`] hold.
 type DynValue = scale_value::Value;
 
+/// Handle a per-item decode failure **visibly** instead of silently swallowing it.
+///
+/// The old behaviour tolerated a bad decode by writing an empty value with no
+/// signal — indistinguishable from an item that genuinely has no fields, which is
+/// a data-integrity footgun for an upgrade-correct indexer. This logs a `warn`
+/// (with kind/pallet/item/height/error) and increments
+/// `subdex_decode_failures_total` (a no-op unless a metrics recorder is
+/// installed). In `strict` mode it returns a [`SubdexError::Decode`] so the block
+/// aborts; otherwise it returns the empty-value fallback so indexing continues.
+fn on_decode_failure(
+    kind: &str, // "event" | "extrinsic"
+    pallet: &str,
+    item: &str, // event name / call name
+    height: u32,
+    err: &str,
+    strict: bool,
+) -> Result<DynValue, SubdexError> {
+    metrics::counter!(
+        "subdex_decode_failures_total",
+        "kind" => kind.to_string(),
+        "pallet" => pallet.to_string(),
+    )
+    .increment(1);
+    tracing::warn!(
+        kind,
+        pallet,
+        item,
+        height,
+        error = err,
+        "failed to decode {kind} fields; recording empty value (set strict to abort)"
+    );
+    if strict {
+        Err(SubdexError::Decode(format!(
+            "{kind} {pallet}.{item} at block {height}: {err}"
+        )))
+    } else {
+        Ok(scale_value::Value::unnamed_composite(Vec::new()))
+    }
+}
+
 /// Build our [`Block`] from a subxt client positioned at a block.
 ///
 /// Concrete to [`ChainConfig`] (subxt's `PolkadotConfig`) so we can read the
@@ -30,6 +70,7 @@ pub async fn map_block<C>(
     finalized: bool,
     selection: DataSelection,
     ss58_prefix: u16,
+    strict: bool,
 ) -> Result<Block, SubdexError>
 where
     C: OnlineClientAtBlockT<ChainConfig>,
@@ -51,7 +92,7 @@ where
     // Events: fetch once if selected; the per-extrinsic success map is derived
     // from them (so it's only available when events are fetched).
     let (events, success) = if selection.events {
-        map_events(at).await?
+        map_events(at, number, strict).await?
     } else {
         (Vec::new(), std::collections::HashMap::new())
     };
@@ -59,7 +100,7 @@ where
     // Extrinsics (and the block timestamp, which lives in the Timestamp.set
     // extrinsic): fetch only if selected.
     let (extrinsics, timestamp) = if selection.extrinsics {
-        let exts = map_extrinsics(at, &success, ss58_prefix).await?;
+        let exts = map_extrinsics(at, &success, ss58_prefix, number, strict).await?;
         let ts = extract_timestamp(&exts);
         (exts, ts)
     } else {
@@ -84,6 +125,8 @@ async fn map_extrinsics<C>(
     at: &ClientAtBlock<ChainConfig, C>,
     success: &std::collections::HashMap<u32, bool>,
     ss58_prefix: u16,
+    height: u32,
+    strict: bool,
 ) -> Result<Vec<Extrinsic>, SubdexError>
 where
     C: OnlineClientAtBlockT<ChainConfig>,
@@ -98,13 +141,18 @@ where
     for ext in exts.iter() {
         let ext = ext.map_err(|e| SubdexError::Decode(format!("extrinsic: {e}")))?;
         let index = ext.index() as u32;
+        let pallet = ext.pallet_name().to_string();
+        let call = ext.call_name().to_string();
 
-        // Decode call args dynamically into a scale Value. We tolerate decode
-        // failures on individual extrinsics by recording an empty value rather
-        // than aborting the whole block.
-        let args = ext
-            .decode_call_data_fields_unchecked_as::<DynValue>()
-            .unwrap_or_else(|_| scale_value::Value::unnamed_composite(Vec::new()));
+        // Decode call args dynamically into a scale Value. A per-extrinsic decode
+        // failure is handled visibly (log + count) rather than silently, and in
+        // strict mode aborts the block.
+        let args = match ext.decode_call_data_fields_unchecked_as::<DynValue>() {
+            Ok(v) => v,
+            Err(e) => {
+                on_decode_failure("extrinsic", &pallet, &call, height, &e.to_string(), strict)?
+            }
+        };
 
         let signed = ext.is_signed();
         // Render the signer as a canonical SS58 address when the address is a
@@ -120,8 +168,8 @@ where
 
         out.push(Extrinsic {
             index,
-            pallet: ext.pallet_name().to_string(),
-            call: ext.call_name().to_string(),
+            pallet,
+            call,
             args,
             signed,
             signer,
@@ -136,6 +184,8 @@ where
 /// so callers don't fetch events twice.
 async fn map_events<C>(
     at: &ClientAtBlock<ChainConfig, C>,
+    height: u32,
+    strict: bool,
 ) -> Result<(Vec<Event>, std::collections::HashMap<u32, bool>), SubdexError>
 where
     C: OnlineClientAtBlockT<ChainConfig>,
@@ -157,10 +207,13 @@ where
             _ => None,
         };
 
+        let pallet = ev.pallet_name().to_string();
+        let name = ev.event_name().to_string();
+
         // Build the success map from System.ExtrinsicSuccess/Failed in the same pass.
-        if ev.pallet_name() == "System" {
+        if pallet == "System" {
             if let Phase::ApplyExtrinsic(idx) = phase {
-                match ev.event_name() {
+                match name.as_str() {
                     "ExtrinsicSuccess" => {
                         success.insert(idx, true);
                     }
@@ -172,14 +225,17 @@ where
             }
         }
 
-        let fields = ev
-            .decode_fields_unchecked_as::<DynValue>()
-            .unwrap_or_else(|_| scale_value::Value::unnamed_composite(Vec::new()));
+        // Decode event fields; a failure is handled visibly (log + count) and, in
+        // strict mode, aborts the block.
+        let fields = match ev.decode_fields_unchecked_as::<DynValue>() {
+            Ok(v) => v,
+            Err(e) => on_decode_failure("event", &pallet, &name, height, &e.to_string(), strict)?,
+        };
 
         out.push(Event {
             index: i as u32,
-            pallet: ev.pallet_name().to_string(),
-            name: ev.event_name().to_string(),
+            pallet,
+            name,
             fields,
             extrinsic_index,
         });
@@ -214,6 +270,31 @@ fn value_first_u64(value: &scale_value::Value) -> Option<u64> {
 mod tests {
     use super::*;
     use scale_value::Value;
+
+    #[test]
+    fn decode_failure_tolerant_returns_empty_value() {
+        // Non-strict: a decode failure yields an empty composite (indexing
+        // continues), not an error.
+        let v = on_decode_failure("event", "Balances", "Transfer", 42, "bad bytes", false)
+            .expect("tolerant mode returns Ok");
+        match v.value {
+            scale_value::ValueDef::Composite(scale_value::Composite::Unnamed(items)) => {
+                assert!(items.is_empty(), "empty fallback value");
+            }
+            other => panic!("expected empty unnamed composite, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_failure_strict_returns_decode_error() {
+        // Strict: the same failure is a hard Decode error carrying context.
+        let err = on_decode_failure("extrinsic", "Balances", "transfer", 42, "bad bytes", true)
+            .expect_err("strict mode returns Err");
+        assert!(matches!(err, SubdexError::Decode(_)));
+        let msg = err.to_string();
+        assert!(msg.contains("Balances.transfer"), "msg: {msg}");
+        assert!(msg.contains("42"), "carries block height: {msg}");
+    }
 
     #[test]
     fn extracts_timestamp_from_named_composite() {
