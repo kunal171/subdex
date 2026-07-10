@@ -7,6 +7,7 @@
 //! framework correct across runtime upgrades without per-chain codegen.
 
 use crate::config::DataSelection;
+use crate::ss58;
 use crate::ChainConfig;
 use subdex_core::{Block, BlockId, Event, Extrinsic, SubdexError};
 use subxt::client::{ClientAtBlock, OnlineClientAtBlockT};
@@ -28,6 +29,7 @@ pub async fn map_block<C>(
     at: &ClientAtBlock<ChainConfig, C>,
     finalized: bool,
     selection: DataSelection,
+    ss58_prefix: u16,
 ) -> Result<Block, SubdexError>
 where
     C: OnlineClientAtBlockT<ChainConfig>,
@@ -57,7 +59,7 @@ where
     // Extrinsics (and the block timestamp, which lives in the Timestamp.set
     // extrinsic): fetch only if selected.
     let (extrinsics, timestamp) = if selection.extrinsics {
-        let exts = map_extrinsics(at, &success).await?;
+        let exts = map_extrinsics(at, &success, ss58_prefix).await?;
         let ts = extract_timestamp(&exts);
         (exts, ts)
     } else {
@@ -81,6 +83,7 @@ where
 async fn map_extrinsics<C>(
     at: &ClientAtBlock<ChainConfig, C>,
     success: &std::collections::HashMap<u32, bool>,
+    ss58_prefix: u16,
 ) -> Result<Vec<Extrinsic>, SubdexError>
 where
     C: OnlineClientAtBlockT<ChainConfig>,
@@ -104,7 +107,16 @@ where
             .unwrap_or_else(|_| scale_value::Value::unnamed_composite(Vec::new()));
 
         let signed = ext.is_signed();
-        let signer = ext.address_bytes().map(|b| format!("0x{}", hex::encode(b)));
+        // Render the signer as a canonical SS58 address when the address is a
+        // 32-byte account (the common MultiAddress::Id case). Fall back to raw
+        // hex for shapes we can't map to an AccountId32 (Index, Address20, …), so
+        // an unusual address never panics or silently drops the signer.
+        let signer = ext
+            .address_bytes()
+            .map(|b| match ss58::account_from_address_bytes(b) {
+                Some(account) => ss58::encode(&account, ss58_prefix),
+                None => format!("0x{}", hex::encode(b)),
+            });
 
         out.push(Extrinsic {
             index,

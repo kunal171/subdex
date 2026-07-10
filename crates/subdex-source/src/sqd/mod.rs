@@ -34,12 +34,16 @@ pub struct SqdConfig {
     pub selection: DataSelection,
     /// Retry policy for transient HTTP failures (timeouts, 5xx, dropped conns).
     pub retry: RetryConfig,
+    /// SS58 network prefix for rendering a call's signer as a `5…`-style address
+    /// (default 42), matching the RPC source. Applied when the portal's `origin`
+    /// carries a 32-byte hex account.
+    pub ss58_prefix: u16,
 }
 
 impl SqdConfig {
     /// Config for `portal_url` + `dataset` with sensible defaults (batch size
     /// 1000 — the portal is columnar and rewards large ranges — fetch everything,
-    /// default retry).
+    /// default retry, SS58 prefix 42).
     pub fn new(portal_url: impl Into<String>, dataset: impl Into<String>) -> Self {
         Self {
             portal_url: portal_url.into(),
@@ -47,6 +51,7 @@ impl SqdConfig {
             batch_size: 1000,
             selection: DataSelection::default(),
             retry: RetryConfig::default(),
+            ss58_prefix: 42,
         }
     }
 
@@ -65,6 +70,12 @@ impl SqdConfig {
     /// Override the retry policy.
     pub fn with_retry(mut self, retry: RetryConfig) -> Self {
         self.retry = retry;
+        self
+    }
+
+    /// Override the SS58 network prefix used for signer addresses (default 42).
+    pub fn with_ss58_prefix(mut self, prefix: u16) -> Self {
+        self.ss58_prefix = prefix;
         self
     }
 }
@@ -107,7 +118,11 @@ impl DataSource for SqdPortalSource {
         })
         .await?;
 
-        let blocks = portal_blocks.into_iter().map(map_block).collect();
+        let prefix = self.config.ss58_prefix;
+        let blocks = portal_blocks
+            .into_iter()
+            .map(|pb| map_block(pb, prefix))
+            .collect();
         Ok(BlockBatch { blocks })
     }
 
