@@ -133,11 +133,18 @@ pub struct SourceConfig {
     /// prefix); set your chain's prefix (e.g. 0 for Polkadot, 2 for Kusama) for
     /// addresses that match block explorers.
     pub ss58_prefix: u16,
+    /// If `true`, a per-item decode failure (an event's fields or an extrinsic's
+    /// args that don't decode) is a **hard error** that aborts the block, instead
+    /// of the default tolerant behaviour (log + count + empty value). Off by
+    /// default; enable for CI / correctness testing where silent empty data is
+    /// unacceptable. Decode failures are always logged (`warn`) and counted
+    /// (`subdex_decode_failures_total`) regardless of this flag.
+    pub strict: bool,
 }
 
 impl SourceConfig {
     /// Create a config for `url` with sensible defaults (batch size 100,
-    /// concurrency 16, fetch everything, SS58 prefix 42).
+    /// concurrency 16, fetch everything, SS58 prefix 42, non-strict decoding).
     pub fn new(url: impl Into<String>) -> Self {
         Self {
             url: url.into(),
@@ -146,6 +153,7 @@ impl SourceConfig {
             selection: DataSelection::default(),
             retry: RetryConfig::default(),
             ss58_prefix: 42,
+            strict: false,
         }
     }
 
@@ -181,6 +189,13 @@ impl SourceConfig {
         self.ss58_prefix = prefix;
         self
     }
+
+    /// Turn on strict decoding: a per-item decode failure becomes a hard error
+    /// instead of an empty-value fallback (default off).
+    pub fn with_strict(mut self, strict: bool) -> Self {
+        self.strict = strict;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -192,6 +207,14 @@ mod tests {
         let c = SourceConfig::new("ws://localhost");
         assert_eq!(c.batch_size, 100);
         assert_eq!(c.concurrency, 16);
+        assert_eq!(c.ss58_prefix, 42);
+        assert!(!c.strict, "tolerant decoding by default");
+    }
+
+    #[test]
+    fn strict_builder() {
+        let c = SourceConfig::new("ws://localhost").with_strict(true);
+        assert!(c.strict);
     }
 
     #[test]

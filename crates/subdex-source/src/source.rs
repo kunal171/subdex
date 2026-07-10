@@ -54,6 +54,7 @@ impl SubxtSource {
                 finalized,
                 self.config.selection,
                 self.config.ss58_prefix,
+                self.config.strict,
             )
             .await
         })
@@ -83,8 +84,14 @@ impl SubxtSource {
                     .at()
                     .await
                     .map_err(|e| SubdexError::Source(format!("at finalized block: {e}")))?;
-                let mapped =
-                    map_block(&at, true, self.config.selection, self.config.ss58_prefix).await?;
+                let mapped = map_block(
+                    &at,
+                    true,
+                    self.config.selection,
+                    self.config.ss58_prefix,
+                    self.config.strict,
+                )
+                .await?;
                 Ok(BlockBatch {
                     blocks: vec![mapped],
                 })

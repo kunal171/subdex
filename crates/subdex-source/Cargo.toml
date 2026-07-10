@@ -16,6 +16,10 @@ tracing.workspace = true
 hex.workspace = true
 base58.workspace = true
 blake2.workspace = true
+# The metrics facade is a no-op without a recorder installed, so the
+# decode-failure counter is zero-cost unless the engine's `metrics` feature wires
+# up an exporter — no feature gate needed here.
+metrics.workspace = true
 
 # Optional: SQD-portal DataSource (HTTP + JSON). Off by default; enable with
 # `--features sqd`. reqwest's `gzip` transparently decompresses the portal's
