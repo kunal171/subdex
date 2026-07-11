@@ -188,3 +188,127 @@ async fn rollback_removes_blocks_above_fork() {
 
     drop_db("rollback").await;
 }
+
+/// Count rows in the bookkeeping table.
+async fn block_row_count(store: &PgStore) -> i64 {
+    sqlx::query_scalar::<_, i64>("SELECT count(*) FROM subdex_block")
+        .fetch_one(store.pool())
+        .await
+        .expect("count")
+}
+
+#[tokio::test]
+#[ignore = "database: needs Postgres; run with --ignored"]
+async fn pruning_keeps_subdex_block_bounded() {
+    // Acceptance: with a retention window of 10, indexing 50 blocks must leave
+    // the table bounded (~the window), not 50 rows.
+    let url = make_db("prune_bounded").await;
+    let store = PgStore::connect(StoreConfig::new(&url).with_reorg_retention(10))
+        .await
+        .expect("connect");
+    store.init().await.expect("init");
+
+    for n in 1..=50 {
+        let parent = if n == 1 {
+            "0x00".to_string()
+        } else {
+            format!("0x{:02x}", n - 1)
+        };
+        commit_block(&store, &block(n, &format!("0x{n:02x}"), &parent, 145)).await;
+    }
+
+    // Cursor is still authoritative at the head.
+    assert_eq!(store.cursor().await.expect("c").expect("s").number, 50);
+
+    // Rows below (50 - 10) = 40 are pruned; heights 40..=50 (11 rows) remain.
+    let count = block_row_count(&store).await;
+    assert_eq!(
+        count, 11,
+        "bounded to the retention window, got {count} rows"
+    );
+    assert!(
+        store.hash_at(39).await.expect("h39").is_none(),
+        "pruned below the window"
+    );
+    assert!(
+        store.hash_at(40).await.expect("h40").is_some(),
+        "window boundary retained"
+    );
+    assert!(
+        store.hash_at(50).await.expect("h50").is_some(),
+        "head retained"
+    );
+
+    drop_db("prune_bounded").await;
+}
+
+#[tokio::test]
+#[ignore = "database: needs Postgres; run with --ignored"]
+async fn reorg_within_the_window_still_works_after_pruning() {
+    // Acceptance: pruning must not break reorg detection/rollback INSIDE the
+    // retained window.
+    let url = make_db("prune_reorg").await;
+    let store = PgStore::connect(StoreConfig::new(&url).with_reorg_retention(10))
+        .await
+        .expect("connect");
+    store.init().await.expect("init");
+
+    for n in 1..=50 {
+        let parent = if n == 1 {
+            "0x00".to_string()
+        } else {
+            format!("0x{:02x}", n - 1)
+        };
+        commit_block(&store, &block(n, &format!("0x{n:02x}"), &parent, 145)).await;
+    }
+
+    // A reorg at height 45 (well inside the 10-block window): the hash is still
+    // there to compare against, and rollback drops everything above it.
+    assert!(
+        store.hash_at(45).await.expect("h45").is_some(),
+        "fork point still in the retained window"
+    );
+    store.rollback_to(45).await.expect("rollback");
+
+    assert_eq!(
+        store.cursor().await.expect("c").expect("s").number,
+        45,
+        "cursor rolled back to the fork"
+    );
+    assert!(store.hash_at(46).await.expect("h46").is_none());
+    assert!(store.hash_at(50).await.expect("h50").is_none());
+
+    drop_db("prune_reorg").await;
+}
+
+#[tokio::test]
+#[ignore = "database: needs Postgres; run with --ignored"]
+async fn retention_zero_disables_pruning() {
+    // Acceptance: pruning is configurable and can be disabled (full audit trail).
+    let url = make_db("prune_off").await;
+    let store = PgStore::connect(StoreConfig::new(&url).with_reorg_retention(0))
+        .await
+        .expect("connect");
+    store.init().await.expect("init");
+
+    for n in 1..=30 {
+        let parent = if n == 1 {
+            "0x00".to_string()
+        } else {
+            format!("0x{:02x}", n - 1)
+        };
+        commit_block(&store, &block(n, &format!("0x{n:02x}"), &parent, 145)).await;
+    }
+
+    assert_eq!(
+        block_row_count(&store).await,
+        30,
+        "retention 0 keeps every row"
+    );
+    assert!(
+        store.hash_at(1).await.expect("h1").is_some(),
+        "genesis row retained when pruning is off"
+    );
+
+    drop_db("prune_off").await;
+}

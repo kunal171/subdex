@@ -16,6 +16,9 @@ use subdex_core::{Block, BlockId, BlockNumber, Result, Store, SubdexError};
 #[derive(Clone)]
 pub struct PgStore {
     pool: PgPool,
+    /// Retained reorg window: rows more than this many blocks below the cursor
+    /// are pruned on commit. `0` disables pruning. See [`StoreConfig::reorg_retention`].
+    reorg_retention: u32,
 }
 
 impl PgStore {
@@ -26,13 +29,26 @@ impl PgStore {
             .connect(&config.url)
             .await
             .map_err(|e| SubdexError::Store(format!("connect: {e}")))?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            reorg_retention: config.reorg_retention,
+        })
     }
 
     /// Build a store from an already-constructed pool (useful for tests that
-    /// manage their own pool/lifecycle).
+    /// manage their own pool/lifecycle). Pruning is disabled (retention 0); use
+    /// [`with_reorg_retention`](PgStore::with_reorg_retention) to set a window.
     pub fn from_pool(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            reorg_retention: 0,
+        }
+    }
+
+    /// Set the retained reorg window on a store built via [`from_pool`](PgStore::from_pool).
+    pub fn with_reorg_retention(mut self, blocks: u32) -> Self {
+        self.reorg_retention = blocks;
+        self
     }
 
     /// Access the underlying pool (e.g. for a handler's own `init` to create its
@@ -111,6 +127,24 @@ impl Store for PgStore {
         .execute(&mut **tx)
         .await
         .map_err(|e| store_err("set_cursor", e))?;
+
+        // Prune old bookkeeping rows that are below the retained reorg window.
+        // These are never read again (reorg checks only look back a bounded
+        // number of blocks), so dropping them keeps `subdex_block` bounded instead
+        // of growing one row per block forever. Done on the SAME transaction, so
+        // it commits atomically with the cursor advance and adds no round-trip.
+        // `reorg_retention == 0` disables it. `saturating_sub` avoids pruning
+        // anything until the cursor climbs past the window.
+        if self.reorg_retention > 0 {
+            let prune_below = block.id.number.saturating_sub(self.reorg_retention);
+            if prune_below > 0 {
+                sqlx::query("DELETE FROM subdex_block WHERE height < $1")
+                    .bind(prune_below as i64)
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(|e| store_err("prune", e))?;
+            }
+        }
         Ok(())
     }
 
