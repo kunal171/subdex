@@ -3,6 +3,11 @@
 use subdex_core::BlockNumber;
 
 /// Tuning knobs for the [`Processor`](crate::Processor) run loop.
+///
+/// Note: how many block rows the *store* retains for reorg detection is a
+/// **store** concern — see `StoreConfig::reorg_retention` in `subdex-store`
+/// (which prunes `subdex_block` on commit). Keep it ≥ [`max_reorg_depth`](Self::max_reorg_depth)
+/// so a reorg's fork point is still in the table.
 #[derive(Clone, Debug)]
 pub struct ProcessorConfig {
     /// Block height to start indexing from when the store has no cursor yet
@@ -12,11 +17,6 @@ pub struct ProcessorConfig {
     /// Maximum number of blocks to request per backfill batch from the source.
     /// The source may return fewer. Defaults to 100.
     pub batch_size: u32,
-    /// How many of the most-recent indexed blocks to retain in the bookkeeping
-    /// table for reorg detection. Reorgs deeper than this cannot be detected
-    /// (they are assumed impossible below finality). `0` means "retain all"
-    /// (no pruning). Defaults to 0 until the processor implements pruning.
-    pub reorg_retention: u32,
     /// Maximum depth (in blocks) a reorg may rewind before the processor treats
     /// it as a hard error rather than rolling back further. On a reorg the engine
     /// walks back to the true common ancestor; if that ancestor is more than
@@ -32,7 +32,6 @@ impl Default for ProcessorConfig {
         Self {
             start_height: 0,
             batch_size: 100,
-            reorg_retention: 0,
             max_reorg_depth: 64,
         }
     }
@@ -69,7 +68,6 @@ mod tests {
         let c = ProcessorConfig::default();
         assert_eq!(c.start_height, 0);
         assert_eq!(c.batch_size, 100);
-        assert_eq!(c.reorg_retention, 0);
         assert_eq!(c.max_reorg_depth, 64);
     }
 

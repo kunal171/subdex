@@ -236,6 +236,14 @@ unbounded). A fork deeper than that below the cursor is a hard error
 that much depth signals a misconfiguration (e.g. a non-finalized source), not a
 real fork.
 
+**The retained window.** The store keeps only the last `StoreConfig::reorg_retention`
+block rows (default 5000; `0` = keep all): on each commit, `set_cursor` prunes
+`subdex_block` rows below `cursor - retention` **on the same transaction**. Those
+rows are never read again — reorg checks only look back a bounded number of
+blocks — so pruning keeps the bookkeeping table bounded instead of growing one row
+per block forever. Keep `reorg_retention` **≥ `max_reorg_depth`** so a reorg's fork
+point is still in the table.
+
 This keeps the database consistent with the canonical chain even when the chain
 reorganizes under us. Because subdex indexes **finalized** blocks, deep reorgs
 aren't expected — but the check is a correctness backstop, and on GRANDPA chains

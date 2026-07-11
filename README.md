@@ -334,8 +334,8 @@ serves a `transfers` query alongside `indexerStatus` from a single binary.
 | Component | Type | Key options |
 |---|---|---|
 | Source | `SourceConfig` | `url` (WSS endpoint), `batch_size`, `concurrency`, `selection` (`DataSelection` — fetch only events/extrinsics you need), `retry` (`RetryConfig` — transient-failure backoff), `ss58_prefix` (signer address prefix, default 42), `strict` (make per-item decode failures hard errors; default off) |
-| Store | `StoreConfig` | `url` (Postgres), `max_connections` |
-| Processor | `ProcessorConfig` | `start_height`, `batch_size`, `reorg_retention`, `max_reorg_depth` (bound the rewind on a reorg; `0` = unbounded) |
+| Store | `StoreConfig` | `url` (Postgres), `max_connections`, `reorg_retention` (block rows kept for reorg detection; older rows pruned on commit — default 5000, `0` = keep all) |
+| Processor | `ProcessorConfig` | `start_height`, `batch_size`, `max_reorg_depth` (bound the rewind on a reorg; `0` = unbounded) |
 | GraphQL | `GraphqlConfig` | `addr` (default `0.0.0.0:4350`), `path` (default `/graphql`) |
 
 The `transfers` example reads `WS_URL`, `DATABASE_URL`, `START_HEIGHT`, `FOLLOW`,
