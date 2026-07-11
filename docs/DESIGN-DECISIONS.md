@@ -16,7 +16,7 @@ forward roadmap, see the [v0.2 milestone](https://github.com/kunal171/subdex/mil
 A **general-purpose, code-first Substrate indexer framework in Rust** — a Subsquid
 (SQD) alternative where you write plain Rust handlers instead of a schema DSL. The
 Unit chain is only a **test target**, never a coupling; "make it generic" has been
-a repeated correction (see §9).
+a repeated correction (see §11).
 
 Guiding principles, in priority order:
 1. **Correctness across runtime upgrades** — decode each block against *its own*
@@ -191,7 +191,7 @@ per-batch async overhead and keeps the no-op truly zero-cost.
 
 ---
 
-## 7. Signer addresses: SS58 with a configurable prefix (in progress, #28)
+## 7. Signer addresses: SS58 with a configurable prefix (#28, PR #41)
 
 **Problem.** The RPC mapping recorded a signed extrinsic's signer as **raw hex**,
 while the example rendered account *event fields* as SS58 — inconsistent.
@@ -209,13 +209,86 @@ while the example rendered account *event fields* as SS58 — inconsistent.
 (variant tag + payload), not a bare account. We decode the common
 `Id`/`Address32` (32-byte) variants and **fall back to raw hex** for shapes we
 can't map (Index, Address20, …) — an unusual address never panics or silently
-drops the signer. `ss58_prefix` is a new `SourceConfig` field (default 42).
+drops the signer. `ss58_prefix` is a `SourceConfig` field (default 42), mirrored
+on `SqdConfig` so both sources agree.
 
-*(Status: implementation underway on `feat/ss58-signer`.)*
+**Known limitation (honest).** We could not find a signed-origin sample in ~200
+recent Polkadot relay blocks (they're overwhelmingly inherents), so the *portal*
+path's `origin` JSON shape is unverified against live data. It therefore
+SS58-encodes only a clear 32-byte hex account and otherwise keeps the string
+as-is — deliberately conservative rather than over-fitted to a shape we couldn't
+confirm.
 
 ---
 
-## 8. Process, tooling & workflow decisions
+## 8. Decode failures: visible, never silent (#29, PR #42)
+
+**Problem.** `mapping.rs` swallowed per-event / per-extrinsic decode failures into
+an empty value:
+
+```rust
+.unwrap_or_else(|_| scale_value::Value::unnamed_composite(Vec::new()))
+```
+
+An empty value from a *failure* is indistinguishable from an item that genuinely
+has no fields. For an indexer whose entire reason to exist is upgrade-correct
+decoding (§0.1), silently writing empty data is precisely the corruption mode
+we're supposed to prevent.
+
+**Decision.** A shared `on_decode_failure` helper for both decode sites:
+- **logs** a structured `warn!` (kind / pallet / item / height / error), and
+- **counts** `subdex_decode_failures_total` (labelled by kind/pallet) via the
+  `metrics` facade.
+
+**Why the counter needs no feature gate.** The `metrics` facade is a **no-op
+unless a recorder is installed**, so the counter is free when the engine's
+`metrics` feature is off and shows up in Prometheus when it's on. Gating it
+behind a new `subdex-source` feature would have bought nothing — rejected.
+
+**`strict` mode.** New `SourceConfig.strict` (default **off**) escalates a decode
+failure to a hard `SubdexError::Decode` that aborts the block (the engine's atomic
+commit means nothing half-writes). Intended for CI / correctness testing.
+*Rejected alternative:* "strict = just log at `error!` but keep going" — the run
+would still 'succeed', so it wouldn't actually catch drift in CI.
+
+**The portal source needs no `strict` knob.** Its `json_to_value` is **total** —
+the JSON is already parsed, so there is no per-item decode-failure site; a
+malformed portal *line* already surfaces as a `Decode` error in the client. Adding
+a `strict` field there would have been a dead knob.
+
+---
+
+## 9. Store pruning: a bounded reorg window (#32, PR #43)
+
+**Problem.** `subdex_block` kept **one row per block, forever**, purely for reorg
+detection. On a multi-million-block chain that's millions of rows that are never
+read again — reorg checks only look back a bounded window, and subdex indexes
+*finalized* blocks.
+
+**Decision.** `StoreConfig.reorg_retention` (default 5000; `0` = keep all), and
+`set_cursor` prunes `subdex_block WHERE height < committed - retention` **on the
+same transaction** — atomic with the cursor advance, no extra round-trip, and the
+latest row is never touched so the cursor stays authoritative.
+
+**Why the store, not the processor.** Two options were on the table: put retention
+on `ProcessorConfig` (and add a `prune()` method to the `Store` trait for the
+engine to call once per batch), or let the store own its own table's policy. We
+chose the **store**: it keeps the `Store` trait surface unchanged and puts the
+policy where the table lives. The cost is that pruning runs once per `set_cursor`
+(i.e. per block in a batch) rather than once per batch — accepted, because each
+`DELETE ... WHERE height < X` is a cheap, bounded, usually-no-op statement.
+
+**A dead field removed.** `ProcessorConfig.reorg_retention` had existed as a stub
+since the early days ("Defaults to 0 until the processor implements pruning") and
+was **never read** — only its own test asserted it. Now that retention genuinely
+lives on `StoreConfig`, keeping an identically-named engine field would actively
+mislead, so it was deleted. Constraint documented in both places:
+**`reorg_retention` must be ≥ `max_reorg_depth`** (§3) or a reorg's fork point
+could be pruned out from under the walk.
+
+---
+
+## 10. Process, tooling & workflow decisions
 
 - **Small commits + feature-branch PRs.** After an early "why is all the work in
   one commit?" correction, every feature since has been small commits on a branch
@@ -236,7 +309,7 @@ drops the signer. `ss58_prefix` is a new `SourceConfig` field (default 42).
 
 ---
 
-## 9. Recurring corrections (things we had to undo/redo)
+## 11. Recurring corrections (things we had to undo/redo)
 
 These are course-corrections worth not repeating:
 
@@ -251,30 +324,45 @@ These are course-corrections worth not repeating:
   historical-only and JSON-vs-Value constraints *before* code, and let us relax an
   impossible acceptance criterion deliberately rather than discover it late.
 - **Verify against reality.** Live tests (RPC and portal) repeatedly caught gaps
-  that fixtures/docs missed. Keep the `#[ignore]`d live tests.
+  that fixtures/docs missed. Keep the `#[ignore]`d live tests. The portal source
+  in particular shipped correct **only** because a live test caught two places
+  where SQD's own docs didn't match the real response (§5).
+- **Don't leave dead config stubs.** `ProcessorConfig.reorg_retention` sat unread
+  for weeks with a "until the processor implements pruning" comment; when pruning
+  actually landed it went on `StoreConfig` instead, and the old field would have
+  silently shadowed the real one. Deleted (§9). A knob nobody reads is worse than
+  no knob.
+- **Branch protection requires an up-to-date branch.** A PR whose checks are green
+  can still be `BEHIND` main and refuse to merge. Update the branch (which re-runs
+  CI) rather than reaching for `--admin`.
 
 ---
 
-## 10. Open decisions / forward-looking
+## 12. Status & open decisions
 
-Tracked on the [v0.2 milestone](https://github.com/kunal171/subdex/milestone/1):
+**Shipped** (all on the [v0.2 milestone](https://github.com/kunal171/subdex/milestone/1)):
+RPC retry (#23, §5) · SQD-portal source, first PR (#24, §5) · observability (#25,
+§6) · deep-reorg walk (#26, §3) · SS58 signer (#28, §7) · decode-failure
+visibility (#29, §8) · store pruning (#32, §9) · CI feature coverage (§10).
+
+**Still open:**
 
 - **HybridSource (#24 follow-up).** Portal backfill → RPC tip — the production
-  shape, now that the portal source is backfill-only by design.
+  shape, now that the portal source is backfill-only *by design* (§5). The biggest
+  remaining item for making the fast source usable end to end.
 - **Concurrent handler compute (#27).** Handlers run sequentially within a batch
   (required for shared-tx atomicity). Likely a two-phase `prepare`(parallel) /
-  `write`(serial) split — preserves atomicity, overlaps decode. API shape is the
-  open question.
-- **Store pruning (#32).** `subdex_block` grows unbounded; prune to a retained
-  reorg window (makes `reorg_retention`/the retained-window concept real).
+  `write`(serial) split — preserves atomicity, overlaps decode. **API shape is the
+  open question**, so this deserves a design pass before code (cf. §5's RFC-first
+  approach, which paid off).
 - **Handler-owned migrations (#33).** The framework versions its own schema;
-  handler tables are ad-hoc `CREATE TABLE IF NOT EXISTS`. Need a versioned
-  migration hook before long-lived production indexers.
-- **Decode-failure visibility (#29).** Per-item decode failures are currently
-  swallowed into empty values — make them logged + counted, with an optional
-  strict mode.
-- **Shared config (#30).** Each binary re-parses the same env vars; a typed
-  env+TOML layer would cut the boilerplate.
+  handler tables are ad-hoc `CREATE TABLE IF NOT EXISTS`. Needs a versioned
+  migration hook before anyone builds a long-lived production indexer on top.
+- **Shared config (#30).** Each binary re-parses the same env vars by hand; a typed
+  env+TOML layer would cut the boilerplate (and stop the example README/code from
+  drifting apart, as it once did — §11).
+- **Multi-handler example (#31).** The only in-repo example wires a single handler;
+  the README itself flags the gap.
 
 **How to add to this log:** when you make a non-obvious design choice — or reverse
 one — add a short entry: *what we did first, why it fell short, what we switched
