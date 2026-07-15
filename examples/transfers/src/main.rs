@@ -6,17 +6,22 @@
 //! `transfers` table — and (by default) serves a GraphQL API over the indexed
 //! data alongside indexing.
 //!
-//! Configuration is read from the environment (a local `.env` is auto-loaded if
-//! present — see `.env.example`).
+//! Framework configuration (source / store / processor) is loaded by
+//! [`subdex_config`] — a local `.env` and an optional `subdex.toml` are picked up
+//! automatically, and env vars override the file. See that crate for the full
+//! variable list (`WS_URL`, `DATABASE_URL`, `BATCH_SIZE`, `CONCURRENCY`,
+//! `SS58_PREFIX`, `STRICT`, `REORG_RETENTION`, `MAX_REORG_DEPTH`, `START_HEIGHT`, …).
 //!
-//! | Var            | Required | Default | Meaning                              |
-//! |----------------|----------|---------|--------------------------------------|
-//! | `WS_URL`       | **yes**  | —       | Chain RPC endpoint                   |
-//! | `DATABASE_URL` | **yes**  | —       | Postgres connection                  |
-//! | `START_HEIGHT` | no       | `head-20` | Backfill start (fresh DB only)     |
-//! | `FOLLOW`       | no       | `1`     | Follow the tip after backfill (`0` exits) |
-//! | `SERVE`        | no       | `1`     | Serve the GraphQL API (`0` to disable) |
-//! | `GRAPHQL_PORT` | no       | `4350`  | Port for the GraphQL server          |
+//! This binary adds three **example-app** knobs on top (not framework config):
+//!
+//! | Var            | Default | Meaning                                    |
+//! |----------------|---------|--------------------------------------------|
+//! | `FOLLOW`       | `1`     | Follow the tip after backfill (`0` exits)  |
+//! | `SERVE`        | `1`     | Serve the GraphQL API (`0` to disable)     |
+//! | `GRAPHQL_PORT` | `4350`  | Port for the GraphQL server                |
+//!
+//! `START_HEIGHT` defaults here to `head - 20` (last ~20 finalized blocks) when
+//! left unset, so a fresh run does something immediately.
 //!
 //! ```bash
 //! cp .env.example .env   # then edit WS_URL / DATABASE_URL
@@ -25,31 +30,20 @@
 
 use async_graphql::{EmptyMutation, EmptySubscription, Schema};
 use std::sync::Arc;
-use subdex::{DataSource, Processor, ProcessorConfig};
+use subdex::{DataSource, Processor};
+use subdex_config::IndexerConfig;
 use subdex_example_transfers::{QueryRoot, TransfersHandler};
 use subdex_graphql::{serve as serve_graphql, GraphqlConfig};
-use subdex_source::{SourceConfig, SubxtSource};
-use subdex_store::{PgStore, StoreConfig};
+use subdex_source::SubxtSource;
+use subdex_store::PgStore;
 
-/// Read an optional env var (tuning knob) with a default.
+/// Read an optional example-app env var (not framework config) with a default.
 fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
 }
 
-/// Read a required env var, erroring with a clear message if it's missing.
-fn require_env(key: &str) -> anyhow::Result<String> {
-    std::env::var(key).map_err(|_| {
-        anyhow::anyhow!(
-            "missing required env var `{key}` (set it in .env or the environment — see .env.example)"
-        )
-    })
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Load a local .env if present (ignored if absent; real env vars win).
-    let _ = dotenvy::dotenv();
-
     // Logs: set RUST_LOG=info for progress output.
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -57,35 +51,33 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    // Required configuration — no hardcoded endpoints/credentials.
-    let ws = require_env("WS_URL")?;
-    let db = require_env("DATABASE_URL")?;
+    // Framework config (source/store/processor) via the shared loader: an
+    // optional TOML file, overlaid by env vars (WS_URL, DATABASE_URL, …). A local
+    // `.env` is auto-loaded. See `subdex-config` for the full var list.
+    let cfg = IndexerConfig::load()?;
 
+    // Example-app knobs (not framework config).
     let follow = env_or("FOLLOW", "1") != "0";
     let serve = env_or("SERVE", "1") != "0";
     let gql_port: u16 = env_or("GRAPHQL_PORT", "4350").parse().unwrap_or(4350);
 
-    tracing::info!(%ws, "connecting to chain");
-    let source = SubxtSource::connect(SourceConfig::new(&ws)).await?;
-    let store = PgStore::connect(StoreConfig::new(&db)).await?;
+    tracing::info!(url = %cfg.source.url.as_deref().unwrap_or(""), "connecting to chain");
+    let source = SubxtSource::connect(cfg.source_config()).await?;
+    let store = PgStore::connect(cfg.store_config()).await?;
     // Clone the pool before the store moves into the processor — the GraphQL
     // server reads from the same database the indexer writes to.
     let pool = store.pool().clone();
 
-    // Default start: the last ~20 finalized blocks, so a fresh run does something
-    // immediately. Overridable via START_HEIGHT.
+    // Start height: use the configured one if set, else default to the last ~20
+    // finalized blocks so a fresh run does something immediately.
     let head = source.finalized_head().await?;
-    let start = match std::env::var("START_HEIGHT") {
-        Ok(s) => s.parse().unwrap_or_else(|_| head.saturating_sub(20)),
-        Err(_) => head.saturating_sub(20),
-    };
+    let mut proc_cfg = cfg.processor_config();
+    if cfg.processor.start_height.is_none() {
+        proc_cfg = proc_cfg.with_start_height(head.saturating_sub(20));
+    }
+    let start = proc_cfg.start_height;
 
-    let processor = Processor::new(
-        source,
-        store,
-        vec![Arc::new(TransfersHandler)],
-        ProcessorConfig::from_height(start),
-    );
+    let processor = Processor::new(source, store, vec![Arc::new(TransfersHandler)], proc_cfg);
 
     // Ensure the schema (subdex_block + transfers) exists before serving queries.
     processor.init().await?;
