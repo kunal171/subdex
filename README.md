@@ -113,6 +113,8 @@ Because each is a trait, the pieces are swappable — e.g. a future SQD-portal
 
 The fastest way to see subdex work is the bundled [`transfers`](./examples/transfers)
 example, which indexes `Assets.Deposited` / `Assets.Withdrawn` events into Postgres.
+For the multi-handler shape (two pallets, two tables, one atomic commit), see the
+[`multi-pallet`](./examples/multi-pallet) example.
 
 **Prerequisites:** Rust ≥ 1.96, Docker (for Postgres).
 
@@ -326,7 +328,8 @@ serves a `transfers` query alongside `indexerStatus` from a single binary.
 | [`subdex`](./crates/subdex) | The engine: backfill + live-follow run loop, reorg handling. Re-exports the core API. | ✅ |
 | [`subdex-graphql`](./crates/subdex-graphql) | GraphQL serving toolkit (`async-graphql` + `axum`) + built-in status query. | ✅ |
 | [`subdex-config`](./crates/subdex-config) | Typed, layered (TOML + env) config loader — one `IndexerConfig::load()` builds the source/store/processor configs. | ✅ |
-| [`examples/transfers`](./examples/transfers) | Runnable example: index Assets deposits/withdrawals into Postgres. | ✅ |
+| [`examples/transfers`](./examples/transfers) | Runnable example: a single handler indexing Assets deposits/withdrawals into Postgres, served over GraphQL. | ✅ |
+| [`examples/multi-pallet`](./examples/multi-pallet) | Runnable example: **two** pallets, **two** handlers (one bulk-writing via `process_batch`) committing atomically into two tables, served over GraphQL. | ✅ |
 
 ---
 
