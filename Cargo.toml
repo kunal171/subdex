@@ -8,6 +8,7 @@ members = [
     "examples/*",
     # Added in subsequent feature branches as each is implemented:
     "crates/subdex-graphql",
+    "crates/subdex-config",
 ]
 
 [workspace.package]
@@ -69,6 +70,7 @@ subdex-core = { path = "crates/subdex-core" }
 subdex-source = { path = "crates/subdex-source" }
 subdex-store = { path = "crates/subdex-store" }
 subdex-graphql = { path = "crates/subdex-graphql" }
+subdex-config = { path = "crates/subdex-config" }
 
 [profile.release]
 opt-level = 3

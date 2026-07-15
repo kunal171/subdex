@@ -1,0 +1,15 @@
+[package]
+name = "subdex-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Typed, layered (TOML + env) configuration loader for subdex indexers."
+
+[dependencies]
+subdex-source.workspace = true
+subdex-store.workspace = true
+subdex.workspace = true
+serde.workspace = true
+toml.workspace = true
+dotenvy.workspace = true
+thiserror.workspace = true

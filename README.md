@@ -325,6 +325,7 @@ serves a `transfers` query alongside `indexerStatus` from a single binary.
 | [`subdex-store`](./crates/subdex-store) | Postgres `Store` via `sqlx` — cursor, hashes, atomic commit, reorg rollback. | ✅ |
 | [`subdex`](./crates/subdex) | The engine: backfill + live-follow run loop, reorg handling. Re-exports the core API. | ✅ |
 | [`subdex-graphql`](./crates/subdex-graphql) | GraphQL serving toolkit (`async-graphql` + `axum`) + built-in status query. | ✅ |
+| [`subdex-config`](./crates/subdex-config) | Typed, layered (TOML + env) config loader — one `IndexerConfig::load()` builds the source/store/processor configs. | ✅ |
 | [`examples/transfers`](./examples/transfers) | Runnable example: index Assets deposits/withdrawals into Postgres. | ✅ |
 
 ---

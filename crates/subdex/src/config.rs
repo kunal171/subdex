@@ -46,6 +46,13 @@ impl ProcessorConfig {
         }
     }
 
+    /// Override the start height (used only on a fresh DB; resumes from the
+    /// cursor otherwise).
+    pub fn with_start_height(mut self, start_height: BlockNumber) -> Self {
+        self.start_height = start_height;
+        self
+    }
+
     /// Override the backfill batch size (floored at 1).
     pub fn with_batch_size(mut self, batch_size: u32) -> Self {
         self.batch_size = batch_size.max(1);

@@ -1,0 +1,23 @@
+# Example subdex indexer configuration (loaded by the `subdex-config` crate).
+#
+# Copy to `subdex.toml` (or point SUBDEX_CONFIG at it). Every value here can be
+# overridden by an environment variable — env always wins — so you can commit a
+# base file and override per-deployment without editing it. All fields are
+# optional except `source.url` (env `WS_URL`) and `store.url` (env `DATABASE_URL`).
+
+[source]
+url = "wss://your-substrate-node:9944"   # env: WS_URL (required)
+batch_size = 100                          # env: BATCH_SIZE
+concurrency = 16                          # env: CONCURRENCY
+ss58_prefix = 42                          # env: SS58_PREFIX (0 = Polkadot, 2 = Kusama, 42 = generic)
+strict = false                            # env: STRICT (true = decode failures abort the block)
+
+[store]
+url = "postgres://postgres:postgres@localhost:5432/subdex"  # env: DATABASE_URL (required)
+max_connections = 5                       # env: MAX_CONNECTIONS
+reorg_retention = 5000                    # env: REORG_RETENTION (0 = keep all rows; else >= max_reorg_depth)
+
+[processor]
+start_height = 0                          # env: START_HEIGHT (fresh DB only; resumes from cursor otherwise)
+max_reorg_depth = 64                      # env: MAX_REORG_DEPTH (0 = unbounded)
+# batch_size defaults to source.batch_size when omitted (or set BATCH_SIZE).
