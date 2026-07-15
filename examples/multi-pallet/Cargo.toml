@@ -1,0 +1,27 @@
+[package]
+name = "subdex-example-multi-pallet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Example subdex indexer: two pallets, two handlers, one atomic commit, served over GraphQL."
+
+[[bin]]
+name = "multi-pallet"
+path = "src/main.rs"
+
+[dependencies]
+subdex.workspace = true
+subdex-source.workspace = true
+subdex-store.workspace = true
+subdex-graphql.workspace = true
+subdex-config.workspace = true
+async-graphql.workspace = true
+subxt.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+sqlx.workspace = true
+scale-value.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true

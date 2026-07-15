@@ -4192,6 +4192,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "subdex-example-multi-pallet"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-graphql",
+ "async-trait",
+ "scale-value",
+ "sqlx",
+ "subdex",
+ "subdex-config",
+ "subdex-graphql",
+ "subdex-source",
+ "subdex-store",
+ "subxt",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "subdex-example-transfers"
 version = "0.1.0"
 dependencies = [
