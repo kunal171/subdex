@@ -28,7 +28,7 @@ pub mod store;
 pub mod types;
 
 pub use error::{Result, SubdexError};
-pub use handler::Handler;
+pub use handler::{Handler, Prepared};
 pub use observer::{NoopObserver, ProcessorObserver};
 pub use source::DataSource;
 pub use store::Store;

@@ -1,4 +1,12 @@
-# RFC: Concurrent handler compute (#27)
+# RFC: Concurrent handler compute (#27) — IMPLEMENTED
+
+> **Status: shipped.** The design below was implemented as described, with one
+> refinement: `Handler::prepare` returns `Result<Option<Box<dyn Prepared<S>>>>`
+> where `None` means "no compute phase — run my `process_batch` in the write
+> phase" (cleaner than a `DeferToProcessBatch` carrier, and fully
+> backwards-compatible). The multi-pallet `AssetsHandler` was converted to the
+> two-phase API as the dogfood.
+
 
 ## Goal
 When an indexer registers several independent handlers (one per pallet, as in the

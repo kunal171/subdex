@@ -35,5 +35,5 @@ pub use metrics::{install_prometheus, PrometheusObserver};
 // Re-export the core contracts so users depend on a single crate.
 pub use subdex_core::{
     Block, BlockBatch, BlockId, BlockNumber, DataSource, Event, Extrinsic, Handler, NoopObserver,
-    ProcessorObserver, Result, Store, SubdexError,
+    Prepared, ProcessorObserver, Result, Store, SubdexError,
 };

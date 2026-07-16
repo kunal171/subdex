@@ -4154,6 +4154,7 @@ name = "subdex"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures",
  "metrics",
  "metrics-exporter-prometheus",
  "scale-value",

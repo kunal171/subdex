@@ -1,16 +1,19 @@
 //! [`AssetsHandler`] — indexes `Assets.Created` / `Assets.Destroyed` events into
 //! an `asset_lifecycle` table.
 //!
-//! This is the **high-throughput** handler shape: it overrides `process_batch`
-//! (instead of `process_block`) to accumulate every matching event across the
-//! *whole batch* in memory, then write them all in **one** multi-row INSERT —
-//! avoiding the per-row-upsert-per-block anti-pattern. It still commits on the
-//! processor's transaction, so it stays atomic with the cursor and the other
-//! handler.
+//! This is the **two-phase / high-throughput** handler shape:
+//! - `prepare` (pure compute, no DB) accumulates every matching event across the
+//!   whole batch into rows — the engine runs this **concurrently** with the other
+//!   handlers' `prepare`;
+//! - [`PreparedAssets::write`] (serial, on the shared transaction) bulk-writes
+//!   them in **one** multi-row INSERT.
+//!
+//! It stays atomic with the cursor and the other handler (all writes share the
+//! one transaction), and avoids the per-row-upsert-per-block anti-pattern.
 
 use crate::value_ext::{as_account_ss58, as_u128, field};
 use async_trait::async_trait;
-use subdex::{Block, Handler, Result, Store, SubdexError};
+use subdex::{Block, Handler, Prepared, Result, Store, SubdexError};
 use subdex_store::PgStore;
 
 /// One accumulated row, ready to bulk-insert.
@@ -22,7 +25,59 @@ struct Row {
     owner: Option<String>,
 }
 
-/// Indexes asset create/destroy lifecycle events with a bulk-write path.
+/// Phase-1 output: the rows to write, carried to the serial write phase.
+pub struct PreparedAssets {
+    rows: Vec<Row>,
+}
+
+#[async_trait]
+impl Prepared<PgStore> for PreparedAssets {
+    async fn write<'a>(self: Box<Self>, tx: &mut <PgStore as Store>::Tx<'a>) -> Result<()> {
+        if self.rows.is_empty() {
+            return Ok(());
+        }
+        // One multi-row INSERT for the whole batch, built with bound parameters
+        // ($N placeholders only — no value interpolation). This is the throughput
+        // win over inserting row-by-row.
+        let mut sql = String::from(
+            "INSERT INTO asset_lifecycle \
+                (block_height, event_index, action, asset_id, owner) VALUES ",
+        );
+        for i in 0..self.rows.len() {
+            let b = i * 5;
+            if i > 0 {
+                sql.push_str(", ");
+            }
+            sql.push_str(&format!(
+                "(${}, ${}, ${}, ${}, ${})",
+                b + 1,
+                b + 2,
+                b + 3,
+                b + 4,
+                b + 5
+            ));
+        }
+        sql.push_str(" ON CONFLICT (block_height, event_index) DO NOTHING");
+
+        // The SQL is a fixed template + generated `$N` placeholders only — every
+        // value is a bound parameter below — so this runtime string is audited-safe.
+        let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
+        for r in &self.rows {
+            q = q
+                .bind(r.block_height)
+                .bind(r.event_index)
+                .bind(r.action)
+                .bind(r.asset_id)
+                .bind(r.owner.clone());
+        }
+        q.execute(&mut **tx)
+            .await
+            .map_err(|e| SubdexError::Handler(format!("bulk insert asset_lifecycle: {e}")))?;
+        Ok(())
+    }
+}
+
+/// Indexes asset create/destroy lifecycle events with a two-phase bulk-write path.
 pub struct AssetsHandler;
 
 impl AssetsHandler {
@@ -34,7 +89,7 @@ impl AssetsHandler {
         }
     }
 
-    /// Extract the accumulated rows for one block (pure; unit-testable).
+    /// Extract the rows for one block (pure; unit-testable).
     fn rows_for_block(block: &Block) -> Vec<Row> {
         let mut out = Vec::new();
         for ev in &block.events {
@@ -74,69 +129,23 @@ impl Handler<PgStore> for AssetsHandler {
         Ok(())
     }
 
-    // We only override process_batch (not process_block), so the default
-    // per-block delegation is bypassed — this handler always sees the whole batch.
-    async fn process_batch<'a>(
-        &self,
-        blocks: &[Block],
-        tx: &mut <PgStore as Store>::Tx<'a>,
-    ) -> Result<()> {
-        // Accumulate every matching event across the whole batch.
+    // Phase 1 — pure compute (no tx). The engine runs this concurrently with the
+    // other handlers' prepare; the rows are written later in the serial phase.
+    async fn prepare(&self, blocks: &[Block]) -> Result<Option<Box<dyn Prepared<PgStore>>>> {
         let rows: Vec<Row> = blocks.iter().flat_map(Self::rows_for_block).collect();
-        if rows.is_empty() {
-            return Ok(());
-        }
-
-        // One multi-row INSERT for the entire batch, built with bound parameters
-        // (no string interpolation of values). This is the throughput win over
-        // inserting row-by-row.
-        let mut sql = String::from(
-            "INSERT INTO asset_lifecycle \
-                (block_height, event_index, action, asset_id, owner) VALUES ",
-        );
-        for i in 0..rows.len() {
-            let b = i * 5;
-            if i > 0 {
-                sql.push_str(", ");
-            }
-            sql.push_str(&format!(
-                "(${}, ${}, ${}, ${}, ${})",
-                b + 1,
-                b + 2,
-                b + 3,
-                b + 4,
-                b + 5
-            ));
-        }
-        sql.push_str(" ON CONFLICT (block_height, event_index) DO NOTHING");
-
-        // The SQL is built only from a fixed template + generated `$N`
-        // placeholders — no user/chain data is interpolated into the string
-        // (every value is a bound parameter below), so this is audited-safe.
-        let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
-        for r in &rows {
-            q = q
-                .bind(r.block_height)
-                .bind(r.event_index)
-                .bind(r.action)
-                .bind(r.asset_id)
-                .bind(r.owner.clone());
-        }
-        q.execute(&mut **tx)
-            .await
-            .map_err(|e| SubdexError::Handler(format!("bulk insert asset_lifecycle: {e}")))?;
-        Ok(())
+        Ok(Some(Box::new(PreparedAssets { rows })))
     }
 
-    // process_block is still required by the trait, but it is never called for
-    // this handler (we overrode process_batch). Delegate defensively in case the
-    // engine ever routes a single block here.
+    // process_block is required by the trait but never reached: we return a
+    // `Some(prepared)` from `prepare`, so the engine uses the write phase. Kept as
+    // a defensive no-op-shaped delegation.
     async fn process_block<'a>(
         &self,
         block: &Block,
         tx: &mut <PgStore as Store>::Tx<'a>,
     ) -> Result<()> {
-        self.process_batch(std::slice::from_ref(block), tx).await
+        let rows: Vec<Row> = Self::rows_for_block(block);
+        Box::new(PreparedAssets { rows }).write(tx).await
     }
 
     fn name(&self) -> &str {
