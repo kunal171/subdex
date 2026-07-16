@@ -186,22 +186,28 @@ the engine knowing which. Hooks are synchronous and expected to be cheap
 
 The engine commits **one transaction per batch** (not per block) — this is the
 DB-side throughput lever, and it keeps the unit of atomicity a whole batch.
-`commit_batch` does, in order:
+`commit_batch` runs in **two phases**:
 
-1. `store.begin()` → open a transaction `tx`.
-2. for each handler: `handler.process_batch(blocks, &mut tx)` → all the batch's
-   INSERTs go on `tx`. (The default `process_batch` calls `process_block` per
-   block; a handler can override it to accumulate across the batch and bulk-write
-   once — the high-throughput path.)
-3. `store.set_cursor(&mut tx, block)` for each block → cursor advance + per-block
-   hashes (for reorg detection) go on the *same* `tx`.
-4. `store.commit(tx)` → commit everything together.
+1. **Prepare (concurrent, no transaction).** Every handler's `prepare(blocks)`
+   runs at once (`try_join_all`) — this is pure compute (decoding the batch into
+   rows), so a multi-handler indexer's decode work *overlaps* instead of summing.
+   A handler that doesn't override `prepare` returns `None` and is handled by its
+   `process_batch` in phase 2 (backwards-compatible).
+2. **Write (serial, on one transaction).** `store.begin()` opens `tx`; then, in
+   handler order, each prepared result is `write`n onto `tx` (or `process_batch`
+   is run for a `None`). `store.set_cursor(&mut tx, block)` records the cursor +
+   per-block hashes on the *same* `tx`; `store.commit(tx)` commits everything.
 
-If any handler returns `Err`, `tx` is dropped — Postgres rolls it back, the cursor
-does **not** advance, and **none** of the batch is persisted. A crash mid-batch
-leaves the database exactly as it was before the batch. There is no "half-indexed"
-state to recover from.
+Writes stay **serial** on the one `tx` (that's what keeps the batch atomic); only
+the compute overlaps. If any handler errors — in `prepare` or `write` — the
+transaction is never committed (or is dropped), the cursor does **not** advance,
+and **none** of the batch is persisted. A crash mid-batch leaves the database
+exactly as it was before. There is no "half-indexed" state to recover from.
 
+> The concurrency win in phase 1 needs a multi-threaded runtime, and — for heavy
+> *synchronous* decoding — offloading via `spawn_blocking`. The API enables the
+> overlap; the deployment realizes it.
+>
 > A single-block `process_block`/`commit_block` path also exists (public helper),
 > but the run loop uses the batch path uniformly.
 

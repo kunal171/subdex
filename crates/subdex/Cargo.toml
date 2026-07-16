@@ -9,6 +9,7 @@ description = "The subdex indexing engine: drives a DataSource through Handlers 
 subdex-core.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
+futures.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 

@@ -382,21 +382,48 @@ where
             })
     }
 
-    /// Commit a batch of blocks atomically: open ONE transaction, run every
-    /// handler's `process_batch` over all the blocks, advance the cursor to the
-    /// last block, then commit once. A handler error drops the transaction
-    /// (rolling back the entire batch) — no partial batch is ever persisted.
+    /// Commit a batch of blocks atomically. Runs every handler over all the blocks
+    /// in **two phases** — a concurrent compute phase then a serial write phase —
+    /// advances the cursor to the last block, and commits once. A handler error
+    /// drops the transaction (rolling back the entire batch) — no partial batch is
+    /// ever persisted.
+    ///
+    /// **Phase 1 (concurrent):** every handler's [`prepare`](subdex_core::Handler::prepare)
+    /// runs at once (`try_join_all`), off the transaction — a multi-handler
+    /// indexer's decode work overlaps instead of summing. A handler that doesn't
+    /// override `prepare` returns `None` and is handled by its `process_batch` in
+    /// phase 2 (backwards-compatible).
+    ///
+    /// **Phase 2 (serial):** on the one shared transaction, in handler order, each
+    /// prepared result is `write`n (or, for `None`, `process_batch` is run). Writes
+    /// stay serial so the batch is still all-or-nothing.
     pub async fn commit_batch(&self, blocks: &[Block]) -> Result<()> {
         if blocks.is_empty() {
             return Ok(());
         }
         let commit_start = Instant::now();
-        let mut tx = self.store.begin().await?;
 
-        for h in &self.handlers {
-            h.process_batch(blocks, &mut tx)
+        // Phase 1 — prepare ALL handlers concurrently (pure compute, no tx). Order
+        // is preserved by try_join_all so `prepared[i]` belongs to `handlers[i]`.
+        let prepared =
+            futures::future::try_join_all(self.handlers.iter().map(|h| h.prepare(blocks)))
                 .await
-                .inspect_err(|e| self.observer.on_error("handler", &e.to_string()))?;
+                .inspect_err(|e| self.observer.on_error("prepare", &e.to_string()))?;
+
+        // Phase 2 — write serially on the one shared transaction, in handler order.
+        let mut tx = self.store.begin().await?;
+        for (h, p) in self.handlers.iter().zip(prepared) {
+            match p {
+                Some(prepared) => prepared
+                    .write(&mut tx)
+                    .await
+                    .inspect_err(|e| self.observer.on_error("handler", &e.to_string()))?,
+                // No separate compute phase: run the handler's batch path now.
+                None => h
+                    .process_batch(blocks, &mut tx)
+                    .await
+                    .inspect_err(|e| self.observer.on_error("handler", &e.to_string()))?,
+            }
         }
 
         // Record every block's hash (needed for reorg detection); the cursor
@@ -974,5 +1001,150 @@ mod tests {
             ProcessorConfig::default(),
         )
         .with_observer(obs)
+    }
+
+    // --- Concurrent handler compute (#27) ---
+
+    use crate::testkit::MemTx;
+    use subdex_core::Prepared;
+
+    /// A prepared carrier that records, on write, the order handlers wrote in.
+    struct SpyPrepared {
+        id: u32,
+        order: Arc<std::sync::Mutex<Vec<u32>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Prepared<MemStore> for SpyPrepared {
+        async fn write<'a>(self: Box<Self>, _tx: &mut MemTx) -> Result<()> {
+            self.order.lock().unwrap().push(self.id);
+            Ok(())
+        }
+    }
+
+    /// A handler whose `prepare` sleeps `delay`, then yields a SpyPrepared. Used to
+    /// prove the prepare phase overlaps across handlers.
+    struct SleepyHandler {
+        id: u32,
+        delay: std::time::Duration,
+        order: Arc<std::sync::Mutex<Vec<u32>>>,
+        /// If set, `write` errors (to test atomicity on a write-phase failure).
+        fail_on_write: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl Handler<MemStore> for SleepyHandler {
+        async fn process_block<'a>(&self, _b: &Block, _tx: &mut MemTx) -> Result<()> {
+            Ok(())
+        }
+        async fn prepare(&self, _blocks: &[Block]) -> Result<Option<Box<dyn Prepared<MemStore>>>> {
+            tokio::time::sleep(self.delay).await;
+            if self.fail_on_write {
+                // A carrier whose write fails.
+                return Ok(Some(Box::new(FailingPrepared)));
+            }
+            Ok(Some(Box::new(SpyPrepared {
+                id: self.id,
+                order: self.order.clone(),
+            })))
+        }
+        fn name(&self) -> &str {
+            "sleepy"
+        }
+    }
+
+    struct FailingPrepared;
+    #[async_trait::async_trait]
+    impl Prepared<MemStore> for FailingPrepared {
+        async fn write<'a>(self: Box<Self>, _tx: &mut MemTx) -> Result<()> {
+            Err(SubdexError::Handler("write failed".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn prepare_phase_runs_concurrently() {
+        // Two handlers, each sleeping 100ms in prepare. If prepare ran serially the
+        // batch would take ~200ms; concurrently it's ~100ms. Assert well under sum.
+        let order = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let p = Processor::new(
+            ScriptedSource::new(vec![]),
+            MemStore::new(),
+            vec![
+                Arc::new(SleepyHandler {
+                    id: 1,
+                    delay: std::time::Duration::from_millis(100),
+                    order: order.clone(),
+                    fail_on_write: false,
+                }),
+                Arc::new(SleepyHandler {
+                    id: 2,
+                    delay: std::time::Duration::from_millis(100),
+                    order: order.clone(),
+                    fail_on_write: false,
+                }),
+            ],
+            ProcessorConfig::default(),
+        );
+
+        let start = std::time::Instant::now();
+        p.commit_batch(&[test_block(1, "0x1", "0x0")])
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_millis(180),
+            "prepare should overlap (~100ms), took {elapsed:?} (serial would be ~200ms)"
+        );
+        // Writes still happen serially in handler order.
+        assert_eq!(
+            *order.lock().unwrap(),
+            vec![1, 2],
+            "writes serial, in order"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_phase_error_rolls_back_the_batch() {
+        // Handler 2's write fails → the whole batch must roll back: no cursor
+        // advance, nothing persisted (atomicity unchanged by the two-phase path).
+        let order = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let p = Processor::new(
+            ScriptedSource::new(vec![]),
+            MemStore::new(),
+            vec![
+                Arc::new(SleepyHandler {
+                    id: 1,
+                    delay: std::time::Duration::from_millis(1),
+                    order: order.clone(),
+                    fail_on_write: false,
+                }),
+                Arc::new(SleepyHandler {
+                    id: 2,
+                    delay: std::time::Duration::from_millis(1),
+                    order: order.clone(),
+                    fail_on_write: true, // this one's write errors
+                }),
+            ],
+            ProcessorConfig::default(),
+        );
+
+        let err = p.commit_batch(&[test_block(1, "0x1", "0x0")]).await;
+        assert!(err.is_err(), "a write-phase error surfaces");
+        assert!(
+            p.store().cursor().await.unwrap().is_none(),
+            "cursor did not advance — batch rolled back"
+        );
+    }
+
+    #[tokio::test]
+    async fn default_prepare_handlers_still_work() {
+        // A handler that doesn't override prepare (returns None) is written via its
+        // process_batch in phase 2 — backwards-compatible.
+        let h = Arc::new(RecordingHandler::new());
+        let p = processor_with(vec![h.clone()]);
+        p.commit_batch(&test_chain(0, 3)).await.unwrap();
+        assert_eq!(h.heights(), vec![0, 1, 2]);
+        assert_eq!(p.store().cursor().await.unwrap().unwrap().number, 2);
     }
 }
