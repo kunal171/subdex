@@ -56,6 +56,75 @@ impl PgStore {
     pub fn pool(&self) -> &PgPool {
         &self.pool
     }
+
+    /// Run a **handler's own** versioned migrations, tracked separately from the
+    /// framework's bookkeeping.
+    ///
+    /// A handler embeds its migrations with [`sqlx::migrate!`] (a `migrations/`
+    /// directory of `NNNN_name.sql` files) and calls this from its
+    /// [`init`](subdex_core::Handler::init). The migrations apply **once, in
+    /// order**, and their applied versions are recorded in a per-handler table
+    /// `_sqlx_migrations_<name>` — isolated from the framework's own
+    /// `_sqlx_migrations` (which tracks `subdex_block`) so the two never collide.
+    /// Re-running is idempotent: already-applied versions are skipped, so a fresh
+    /// DB and an upgraded DB converge.
+    ///
+    /// `name` identifies the handler's migration set; it is sanitized to a safe
+    /// SQL identifier (see [`handler_migrations_table`]).
+    ///
+    /// ```no_run
+    /// # async fn ex(store: &subdex_store::PgStore) -> subdex_core::Result<()> {
+    /// static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+    /// store.run_handler_migrations(&MIGRATOR, "transfers").await?;
+    /// # Ok(()) }
+    /// ```
+    pub async fn run_handler_migrations(
+        &self,
+        migrator: &sqlx::migrate::Migrator,
+        name: &str,
+    ) -> Result<()> {
+        let table = handler_migrations_table(name);
+        // `Migrator` isn't `Clone`, and the caller's is a `&'static` — so build an
+        // owned copy (all fields are Cow/bool) and point *that* at the handler's
+        // own tracking table, leaving the caller's untouched.
+        let mut m = sqlx::migrate::Migrator {
+            migrations: migrator.migrations.clone(),
+            ignore_missing: migrator.ignore_missing,
+            locking: migrator.locking,
+            no_tx: migrator.no_tx,
+            table_name: migrator.table_name.clone(),
+            create_schemas: migrator.create_schemas.clone(),
+        };
+        m.dangerous_set_table_name(table);
+        m.run(&self.pool)
+            .await
+            .map_err(|e| store_err(&format!("handler migrations `{name}`"), e.into()))?;
+        Ok(())
+    }
+}
+
+/// The per-handler migration-tracking table name for `name`, isolated from the
+/// framework's `_sqlx_migrations`. `name` is reduced to `[a-z0-9_]` (other
+/// characters become `_`) so it's always a safe, unquoted SQL identifier; an
+/// empty/failing name falls back to `handler`.
+pub fn handler_migrations_table(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|c| {
+            let c = c.to_ascii_lowercase();
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let base = if sanitized.is_empty() {
+        "handler"
+    } else {
+        &sanitized
+    };
+    format!("_sqlx_migrations_{base}")
 }
 
 /// Map any sqlx error into the framework's store error.
@@ -171,5 +240,37 @@ impl Store for PgStore {
             .await
             .map_err(|e| store_err("rollback commit", e))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::handler_migrations_table;
+
+    #[test]
+    fn migration_table_is_a_safe_identifier() {
+        assert_eq!(
+            handler_migrations_table("transfers"),
+            "_sqlx_migrations_transfers"
+        );
+        // Uppercase + dashes/dots/spaces are normalized to a safe identifier.
+        assert_eq!(
+            handler_migrations_table("My-Handler.v2 x"),
+            "_sqlx_migrations_my_handler_v2_x"
+        );
+    }
+
+    #[test]
+    fn empty_name_falls_back() {
+        assert_eq!(handler_migrations_table(""), "_sqlx_migrations_handler");
+        assert_eq!(handler_migrations_table("!!!"), "_sqlx_migrations____");
+    }
+
+    #[test]
+    fn distinct_names_get_distinct_tables() {
+        assert_ne!(
+            handler_migrations_table("balances"),
+            handler_migrations_table("assets")
+        );
     }
 }

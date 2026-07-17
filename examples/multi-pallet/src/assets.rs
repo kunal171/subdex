@@ -110,23 +110,19 @@ impl AssetsHandler {
     }
 }
 
+/// This handler's own **versioned** migrations, embedded at compile time from
+/// `migrations/assets/`. Unlike an ad-hoc `CREATE TABLE IF NOT EXISTS` in `init`,
+/// these apply once, in order, and are recorded — so a schema evolution (v2 adds
+/// an index) reaches an existing deployment exactly once, and a fresh DB gets the
+/// whole set. The framework owns `subdex_block`; the handler owns this.
+static MIGRATOR: subdex_store::Migrator = sqlx::migrate!("./migrations/assets");
+
 #[async_trait]
 impl Handler<PgStore> for AssetsHandler {
     async fn init(&self, store: &PgStore) -> Result<()> {
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS asset_lifecycle (\
-                id           BIGSERIAL PRIMARY KEY, \
-                block_height BIGINT NOT NULL, \
-                event_index  BIGINT NOT NULL, \
-                action       TEXT NOT NULL, \
-                asset_id     BIGINT, \
-                owner        TEXT, \
-                UNIQUE (block_height, event_index))",
-        )
-        .execute(store.pool())
-        .await
-        .map_err(|e| SubdexError::Handler(format!("create asset_lifecycle: {e}")))?;
-        Ok(())
+        // Applied once, in order, tracked in `_sqlx_migrations_assets` — isolated
+        // from the framework's own `_sqlx_migrations`.
+        store.run_handler_migrations(&MIGRATOR, self.name()).await
     }
 
     // Phase 1 — pure compute (no tx). The engine runs this concurrently with the

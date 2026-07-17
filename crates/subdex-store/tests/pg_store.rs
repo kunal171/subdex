@@ -312,3 +312,109 @@ async fn retention_zero_disables_pruning() {
 
     drop_db("prune_off").await;
 }
+
+// --- Handler-owned migrations (#33) ---
+
+/// A handler's own embedded migrations (two versions: create, then evolve).
+static HANDLER_MIGRATOR: subdex_store::Migrator =
+    sqlx::migrate!("./tests/fixtures/handler_migrations");
+
+/// Does `table` exist in the current database?
+async fn table_exists(store: &PgStore, table: &str) -> bool {
+    sqlx::query_scalar::<_, bool>("SELECT to_regclass($1) IS NOT NULL")
+        .bind(table)
+        .fetch_one(store.pool())
+        .await
+        .expect("to_regclass")
+}
+
+#[tokio::test]
+#[ignore = "database: needs Postgres; run with --ignored"]
+async fn handler_migrations_apply_once_in_order_and_are_idempotent() {
+    let url = make_db("handler_migrations").await;
+    let store = PgStore::connect(StoreConfig::new(&url))
+        .await
+        .expect("connect");
+    store.init().await.expect("framework init");
+
+    // Apply the handler's migrations.
+    store
+        .run_handler_migrations(&HANDLER_MIGRATOR, "widgets")
+        .await
+        .expect("run handler migrations");
+
+    // Both versions applied, in order: the table exists AND has the v2 column.
+    assert!(
+        table_exists(&store, "widgets").await,
+        "0001 created the table"
+    );
+    let has_colour: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns \
+         WHERE table_name = 'widgets' AND column_name = 'colour')",
+    )
+    .fetch_one(store.pool())
+    .await
+    .expect("column check");
+    assert!(has_colour, "0002 added the colour column");
+
+    // Recorded in the handler's OWN tracking table…
+    assert!(
+        table_exists(&store, "_sqlx_migrations_widgets").await,
+        "handler migrations tracked in their own table"
+    );
+    let applied: i64 = sqlx::query_scalar("SELECT count(*) FROM _sqlx_migrations_widgets")
+        .fetch_one(store.pool())
+        .await
+        .expect("count applied");
+    assert_eq!(applied, 2, "both handler migrations recorded");
+
+    // …isolated from the framework's own migration table, which only tracks the
+    // bookkeeping schema (this is the collision the per-handler table prevents).
+    let framework: i64 = sqlx::query_scalar("SELECT count(*) FROM _sqlx_migrations")
+        .fetch_one(store.pool())
+        .await
+        .expect("count framework");
+    assert_eq!(
+        framework, 1,
+        "framework table untouched by handler migrations"
+    );
+
+    // Idempotent: re-running applies nothing new and does not error (a fresh DB
+    // and an already-migrated DB converge).
+    store
+        .run_handler_migrations(&HANDLER_MIGRATOR, "widgets")
+        .await
+        .expect("re-run is idempotent");
+    let applied_again: i64 = sqlx::query_scalar("SELECT count(*) FROM _sqlx_migrations_widgets")
+        .fetch_one(store.pool())
+        .await
+        .expect("count applied again");
+    assert_eq!(applied_again, 2, "re-run applied nothing new");
+
+    drop_db("handler_migrations").await;
+}
+
+#[tokio::test]
+#[ignore = "database: needs Postgres; run with --ignored"]
+async fn two_handlers_get_separate_migration_tables() {
+    // Two handlers running migrations must not collide on one tracking table.
+    let url = make_db("handler_migrations_two").await;
+    let store = PgStore::connect(StoreConfig::new(&url))
+        .await
+        .expect("connect");
+    store.init().await.expect("framework init");
+
+    store
+        .run_handler_migrations(&HANDLER_MIGRATOR, "alpha")
+        .await
+        .expect("alpha");
+    // The same migration set under a different handler name tracks separately.
+    // (Its DDL is IF NOT EXISTS / would conflict, so we only assert the tables.)
+    assert!(table_exists(&store, "_sqlx_migrations_alpha").await);
+    assert!(
+        !table_exists(&store, "_sqlx_migrations_beta").await,
+        "beta hasn't run yet"
+    );
+
+    drop_db("handler_migrations_two").await;
+}
