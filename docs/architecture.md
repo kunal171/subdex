@@ -136,6 +136,32 @@ The default implementation, [`PgStore`](../crates/subdex-store), keeps this in a
 `subdex_block` table and exposes a `sqlx::Transaction` as `Tx`, so your handler
 writes and the cursor advance are one atomic unit.
 
+#### Schema ownership: who migrates what
+
+The boundary is explicit:
+
+- **The framework owns `subdex_block`**, migrated by its embedded `MIGRATOR` and
+  tracked in `_sqlx_migrations`. You never touch it.
+- **A handler owns its entity tables** — *and their migrations*. Rather than an
+  ad-hoc `CREATE TABLE IF NOT EXISTS` in `init` (which can't express an
+  evolution — a new column or index on an already-deployed database), a handler
+  embeds its own versioned set with `sqlx::migrate!("./migrations/<name>")` and
+  runs it from `init`:
+
+  ```rust
+  static MIGRATOR: subdex_store::Migrator = sqlx::migrate!("./migrations/assets");
+
+  async fn init(&self, store: &PgStore) -> Result<()> {
+      store.run_handler_migrations(&MIGRATOR, self.name()).await
+  }
+  ```
+
+  They apply **once, in order**, and are recorded in a **per-handler** table
+  (`_sqlx_migrations_<name>`) — isolated from the framework's, so two handlers (or
+  a handler and the framework) never collide on one tracking table. Re-running
+  `init` is idempotent: a fresh database and an already-migrated one converge.
+  See the [`multi-pallet`](../examples/multi-pallet) example's `AssetsHandler`.
+
 ---
 
 ## The engine: `Processor`

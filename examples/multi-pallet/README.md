@@ -21,6 +21,12 @@ It shows:
   Postgres pool the indexer writes to.
 - **Config via [`subdex-config`](../../crates/subdex-config)** — no hand-rolled
   env parsing.
+- **Versioned handler migrations.** `AssetsHandler` owns its schema via
+  [`migrations/assets/`](./migrations/assets) (embedded with `sqlx::migrate!`) and
+  applies them in `init` with `store.run_handler_migrations(&MIGRATOR, name)` —
+  applied once, in order, tracked in `_sqlx_migrations_assets`, isolated from the
+  framework's own migrations. `BalancesHandler` keeps the simpler ad-hoc
+  `CREATE TABLE IF NOT EXISTS` for contrast.
 
 ## Run
 
