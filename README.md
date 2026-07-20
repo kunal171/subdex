@@ -363,24 +363,31 @@ on Polkadot; ~1,600 blk/s on a 5k-block range). Two caveats, both inherent to th
 portal:
 
 - **Backfill-only.** The portal has no live Substrate tip, so `next_finalized`
-  errors — pair it with an `SubxtSource` for the live phase (a `HybridSource`
-  is planned). Ideal for the historical catch-up, then hand off to RPC.
+  errors on its own — pair it with an RPC source via **`HybridSource`** (below).
 - **Decoded values are equivalent, not identical, to RPC.** The portal pre-decodes
   args to JSON; subdex bridges that to `scale_value::Value` so handlers keep the
   same type. Structural fields (heights, hashes, event names/indices, timestamps)
   match RPC exactly; complex arg shapes (enums, byte arrays) may differ.
 
-```rust
-use subdex_source::{SqdConfig, SqdPortalSource};
+**`HybridSource` (`sqd` feature)** — the production shape: backfill history from the
+portal (fast), follow the live tip via RPC. It's a `DataSource` composed of two
+`DataSource`s — `fetch_batch` delegates to the backfill source, `next_finalized`
+to the tip source, and `finalized_head` is the max of both — so the engine
+backfills all the way to the tip, then follows, with no code changes.
 
-let source = SqdPortalSource::connect(
-    SqdConfig::new("https://portal.sqd.dev", "polkadot")
-        .with_batch_size(5000), // the portal rewards large ranges
+```rust
+use subdex_source::{HybridSource, SqdConfig, SqdPortalSource, SourceConfig, SubxtSource};
+
+let portal = SqdPortalSource::connect(
+    SqdConfig::new("https://portal.sqd.dev", "polkadot").with_batch_size(5000),
 )?;
+let rpc = SubxtSource::connect(SourceConfig::new("wss://your-node:9944")).await?;
+let source = HybridSource::new(portal, rpc); // fast backfill → live RPC tip
 ```
 
-Because both are `DataSource`s, **handlers and the engine don't change** when you
-switch — that's the point of the trait seam.
+`HybridSource` is generic over any backfill + tip `DataSource`, not just portal +
+RPC. Because everything is a `DataSource`, **handlers and the engine don't change**
+when you switch — that's the point of the trait seam.
 
 ---
 

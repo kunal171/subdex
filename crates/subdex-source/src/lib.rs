@@ -24,6 +24,8 @@
 //! ```
 
 mod config;
+#[cfg(feature = "sqd")]
+mod hybrid;
 mod mapping;
 mod retry;
 mod source;
@@ -34,5 +36,7 @@ mod ss58;
 pub use config::{DataSelection, RetryConfig, SourceConfig};
 pub use source::{ChainConfig, SubxtSource};
 
+#[cfg(feature = "sqd")]
+pub use hybrid::HybridSource;
 #[cfg(feature = "sqd")]
 pub use sqd::{SqdConfig, SqdPortalSource};
