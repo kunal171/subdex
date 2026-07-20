@@ -78,7 +78,9 @@ crates/subdex-source/
 - [~] Backfill output matches RPC on **structural fields + event identity**; the
   decoded `Value` contents are *equivalent* (documented divergence on
   `json_to_value`, not byte-identical — inherent to a different decoder).
-- [ ] `HybridSource` documented: portal backfill → RPC tip. **DEFERRED** (follow-up).
+- [x] `HybridSource` (portal backfill → RPC tip). **Shipped** — a generic
+  `HybridSource<B, T>` delegating `fetch_batch`→backfill, `next_finalized`→tip,
+  `finalized_head`→max(both). See `crates/subdex-source/src/hybrid.rs`.
 - [x] Benchmark portal vs RPC — see below.
 
 ## What live testing corrected (docs vs reality)
