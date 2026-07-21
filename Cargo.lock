@@ -4168,6 +4168,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "subdex-codegen"
+version = "0.1.0"
+dependencies = [
+ "async-graphql-parser",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "subdex-config"
 version = "0.1.0"
 dependencies = [
