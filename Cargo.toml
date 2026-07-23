@@ -9,6 +9,7 @@ members = [
     # Added in subsequent feature branches as each is implemented:
     "crates/subdex-graphql",
     "crates/subdex-config",
+    "crates/subdex-codegen",
 ]
 
 [workspace.package]
@@ -37,6 +38,8 @@ sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres",
 
 # graphql / http
 async-graphql = "7"
+# Schema parsing for subdex-codegen (same major as async-graphql, already in tree)
+async-graphql-parser = "7"
 async-graphql-axum = "7"
 axum = "0.8"
 
@@ -71,6 +74,7 @@ subdex-source = { path = "crates/subdex-source" }
 subdex-store = { path = "crates/subdex-store" }
 subdex-graphql = { path = "crates/subdex-graphql" }
 subdex-config = { path = "crates/subdex-config" }
+subdex-codegen = { path = "crates/subdex-codegen" }
 
 [profile.release]
 opt-level = 3

@@ -1,0 +1,16 @@
+[package]
+name = "subdex-codegen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Schema-first codegen for subdex: turn a GraphQL @entity schema into Rust entities, migrations, and a GraphQL API."
+
+[[bin]]
+name = "subdex-codegen"
+path = "src/main.rs"
+
+[dependencies]
+async-graphql-parser.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
