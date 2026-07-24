@@ -46,6 +46,8 @@
 //! Anything else is a clear error rather than a silently-wrong table. The parser
 //! is validated against a real 103-entity production schema.
 
+pub mod gen_rust;
+pub mod gen_sql;
 pub mod model;
 pub mod parse;
 
@@ -97,4 +99,26 @@ pub enum SchemaDirError {
     Empty { path: String },
     #[error(transparent)]
     Parse(#[from] ParseError),
+}
+
+/// The files a `generate` run produces, relative to the output directory.
+pub struct Generated {
+    /// `entities.rs` — the Rust entity structs + enums.
+    pub entities_rs: String,
+    /// A migration `NNNN_<name>.sql` — the CREATE TABLE / index DDL.
+    pub migration_sql: String,
+    /// The migration filename (e.g. `0001_schema.sql`).
+    pub migration_name: String,
+}
+
+/// Render (but don't write) the generated artifacts for a schema.
+///
+/// Splitting rendering from writing keeps the whole pipeline testable without
+/// touching the filesystem.
+pub fn generate(schema: &Schema) -> Generated {
+    Generated {
+        entities_rs: gen_rust::render(schema),
+        migration_sql: gen_sql::render(schema),
+        migration_name: "0001_schema.sql".to_string(),
+    }
 }
