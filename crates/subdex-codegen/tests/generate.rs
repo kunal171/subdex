@@ -45,6 +45,18 @@ fn generates_compilable_looking_rust_and_valid_looking_sql() {
     // Enum round-trip.
     assert!(rs.contains("Self::Deposit => \"DEPOSIT\","));
 
+    // --- upsert helpers (same file as the structs) ---
+    assert!(rs.contains("impl Transfer {"));
+    assert!(rs.contains("pub async fn upsert<'e, E>"));
+    assert!(rs.contains("E: sqlx::PgExecutor<'e>"));
+    // Upsert on the PK; BigInt binds via ::text::numeric; keyword column quoted.
+    assert!(rs.contains("ON CONFLICT (\"id\") DO UPDATE SET"));
+    assert!(rs.contains("$5::text::numeric") || rs.contains("::text::numeric"));
+    assert!(rs.contains(".bind(&self.from)"));
+    // The SQL must be a raw literal — it contains double-quoted identifiers, so a
+    // plain "…" literal would not compile.
+    assert!(rs.contains("r#\"INSERT INTO transfers"));
+
     // --- migration ---
     let sql = &g.migration_sql;
     assert_eq!(g.migration_name, "0001_schema.sql");
