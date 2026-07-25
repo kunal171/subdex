@@ -25,9 +25,9 @@
 //! ## Status
 //!
 //! This crate is built in stages (see `docs/rfcs/034-schema-first-codegen.md`):
-//! 1. **schema parsing → entity model** ← *you are here*
+//! 1. schema parsing → entity model
 //! 2. entity structs + SQL migration generation
-//! 3. typed upsert helpers
+//! 3. **typed upsert helpers** ← *you are here*
 //! 4. `async-graphql` types + resolvers
 //!
 //! ## Supported schema dialect (v1)
@@ -48,6 +48,7 @@
 
 pub mod gen_rust;
 pub mod gen_sql;
+pub mod gen_upsert;
 pub mod model;
 pub mod parse;
 
@@ -116,8 +117,14 @@ pub struct Generated {
 /// Splitting rendering from writing keeps the whole pipeline testable without
 /// touching the filesystem.
 pub fn generate(schema: &Schema) -> Generated {
+    // The upsert `impl`s live in the same file as the structs they extend, so a
+    // builder imports one `entities` module and gets both the data model and its
+    // persistence.
+    let mut entities_rs = gen_rust::render(schema);
+    entities_rs.push('\n');
+    entities_rs.push_str(&gen_upsert::render(schema));
     Generated {
-        entities_rs: gen_rust::render(schema),
+        entities_rs,
         migration_sql: gen_sql::render(schema),
         migration_name: "0001_schema.sql".to_string(),
     }
