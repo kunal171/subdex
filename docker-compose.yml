@@ -1,0 +1,57 @@
+# subdex — Postgres + an example indexer, runnable with `docker compose up`.
+#
+#   1. Set WS_URL to a Substrate node (env var or a local `.env`):
+#        WS_URL=wss://rpc.polkadot.io docker compose up --build
+#   2. GraphQL API is served on http://localhost:4350/graphql
+#
+# The indexer ships the `transfers` example by default; override BIN/PACKAGE
+# build args in the Dockerfile to run a different one.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: subdex
+    ports:
+      - "55432:5432"
+    volumes:
+      - subdex-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The indexer waits on this so it never races an unready database.
+      test: ["CMD-SHELL", "pg_isready -U postgres -d subdex"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Required: the chain to index. Set it in your shell or a local `.env`:
+      #   echo 'WS_URL=wss://rpc.polkadot.io' > .env   # then: docker compose up
+      # Left empty here (not a `:?` gate) so `docker compose logs/ps/down` keep
+      # working even when WS_URL isn't exported; the indexer errors clearly at
+      # startup if it's unset.
+      WS_URL: ${WS_URL:-}
+      # Point at the db service (in-network host/port, not the published 55432).
+      DATABASE_URL: postgres://postgres:postgres@db:5432/subdex
+      GRAPHQL_PORT: "4350"
+      RUST_LOG: ${RUST_LOG:-info}
+      # Optional tuning — uncomment to override the example defaults.
+      # START_HEIGHT: ""
+      # BATCH_SIZE: "100"
+      # CONCURRENCY: "4"
+      # FOLLOW: "1"
+      # SERVE: "1"
+    ports:
+      - "4350:4350"
+    restart: unless-stopped
+
+volumes:
+  subdex-pgdata:
