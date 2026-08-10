@@ -1,0 +1,28 @@
+# Build artifacts — never ship the host's target/ into the build context.
+target/
+**/target/
+
+# VCS + editor
+.git/
+.gitignore
+.github/
+**/.DS_Store
+
+# Local env / secrets — must not leak into an image layer.
+.env
+**/.env
+!**/.env.example
+
+# Docs / meta that don't affect the build
+*.md
+docs/
+rfcs/
+
+# Node (examples/tests may pull JS tooling)
+node_modules/
+**/node_modules/
+
+# Docker files themselves
+Dockerfile
+.dockerignore
+docker-compose*.yml

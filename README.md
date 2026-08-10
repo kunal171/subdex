@@ -152,6 +152,24 @@ FROM transfers ORDER BY block_height DESC LIMIT 10;
 
 Accounts are rendered as **SS58** (`5…`) addresses, just like block explorers.
 
+### Or run it all in Docker
+
+A [`Dockerfile`](./Dockerfile) + [`docker-compose.yml`](./docker-compose.yml) bring up
+Postgres **and** the `transfers` indexer together — no local Rust toolchain needed.
+Just point it at a chain:
+
+```bash
+# WS_URL is the only thing you must set (shell env or a local .env).
+WS_URL=wss://rpc.polkadot.io docker compose up --build
+```
+
+- GraphQL API: `http://localhost:4350/graphql`
+- Postgres: `postgres://postgres:postgres@localhost:55432/subdex`
+
+The image is multi-stage (build → slim Debian runtime with CA certs for the chain's
+WSS endpoint), runs as a non-root user, and ships the `transfers` example by default —
+override the `BIN`/`PACKAGE` build args to run a different binary.
+
 ---
 
 ## Write your own indexer
