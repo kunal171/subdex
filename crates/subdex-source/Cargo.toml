@@ -37,3 +37,8 @@ sqd = ["dep:reqwest", "dep:serde", "dep:serde_json"]
 [dev-dependencies]
 tokio = { workspace = true }
 serde_json = { workspace = true }
+
+# Portal backfill throughput benchmark — needs the SqdPortalSource (sqd feature).
+[[example]]
+name = "portal_backfill_bench"
+required-features = ["sqd"]
