@@ -27,8 +27,8 @@
 //! This crate is built in stages (see `docs/rfcs/034-schema-first-codegen.md`):
 //! 1. schema parsing → entity model
 //! 2. entity structs + SQL migration generation
-//! 3. **typed upsert helpers** ← *you are here*
-//! 4. `async-graphql` types + resolvers
+//! 3. typed upsert helpers
+//! 4. **`async-graphql` types + resolvers** ← *you are here* (Tier 1 complete)
 //!
 //! ## Supported schema dialect (v1)
 //!
@@ -46,6 +46,7 @@
 //! Anything else is a clear error rather than a silently-wrong table. The parser
 //! is validated against a real 103-entity production schema.
 
+pub mod gen_graphql;
 pub mod gen_rust;
 pub mod gen_sql;
 pub mod gen_upsert;
@@ -110,6 +111,9 @@ pub struct Generated {
     pub migration_sql: String,
     /// The migration filename (e.g. `0001_schema.sql`).
     pub migration_name: String,
+    /// `graphql.rs` — async-graphql read models + resolvers + the merged
+    /// `QueryRoot`.
+    pub graphql_rs: String,
 }
 
 /// Render (but don't write) the generated artifacts for a schema.
@@ -127,5 +131,6 @@ pub fn generate(schema: &Schema) -> Generated {
         entities_rs,
         migration_sql: gen_sql::render(schema),
         migration_name: "0001_schema.sql".to_string(),
+        graphql_rs: gen_graphql::render(schema),
     }
 }
