@@ -62,12 +62,12 @@ USAGE:
         that will be generated. Does not write anything.
 
     subdex-codegen generate <schema.graphql | schema-dir> [--out <dir>]
-        Generate `entities.rs` (Rust structs) and a `migrations/NNNN_schema.sql`
-        migration into <dir> (default: ./generated). Files carry a DO-NOT-EDIT
-        header — edit the schema and re-run, don't hand-edit the output.
+        Generate `entities.rs` (Rust structs + typed upserts), a
+        `migrations/NNNN_schema.sql` migration, and `graphql.rs` (async-graphql
+        read models + resolvers) into <dir> (default: ./generated). Files carry a
+        DO-NOT-EDIT header — edit the schema and re-run, don't hand-edit output.
 
-More generation (typed upsert helpers, GraphQL types/resolvers) lands in later
-releases — see docs/rfcs/034-schema-first-codegen.md."
+See docs/rfcs/034-schema-first-codegen.md for the full pipeline."
     );
 }
 
@@ -105,6 +105,7 @@ fn generate(schema_path: &Path, out: &Path) -> ExitCode {
 
     let entities_path = out.join("entities.rs");
     let migration_path = migrations.join(&g.migration_name);
+    let graphql_path = out.join("graphql.rs");
     if let Err(e) = std::fs::write(&entities_path, &g.entities_rs) {
         eprintln!("error: writing `{}`: {e}", entities_path.display());
         return ExitCode::FAILURE;
@@ -113,9 +114,13 @@ fn generate(schema_path: &Path, out: &Path) -> ExitCode {
         eprintln!("error: writing `{}`: {e}", migration_path.display());
         return ExitCode::FAILURE;
     }
+    if let Err(e) = std::fs::write(&graphql_path, &g.graphql_rs) {
+        eprintln!("error: writing `{}`: {e}", graphql_path.display());
+        return ExitCode::FAILURE;
+    }
 
     println!(
-        "✓ generated {} entit{} into {}:\n    {}\n    {}",
+        "✓ generated {} entit{} into {}:\n    {}\n    {}\n    {}",
         schema.entities.len(),
         if schema.entities.len() == 1 {
             "y"
@@ -125,6 +130,7 @@ fn generate(schema_path: &Path, out: &Path) -> ExitCode {
         out.display(),
         entities_path.display(),
         migration_path.display(),
+        graphql_path.display(),
     );
     ExitCode::SUCCESS
 }
