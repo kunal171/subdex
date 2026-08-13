@@ -52,6 +52,7 @@ pub mod gen_sql;
 pub mod gen_upsert;
 pub mod model;
 pub mod parse;
+pub mod scaffold;
 
 pub use model::{Entity, EnumDef, Field, FieldType, Scalar, Schema};
 pub use parse::{parse_schema, ParseError};
