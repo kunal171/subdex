@@ -20,7 +20,6 @@
 pub mod assets;
 pub mod balances;
 pub mod graphql;
-pub mod value_ext;
 
 pub use assets::AssetsHandler;
 pub use balances::BalancesHandler;
