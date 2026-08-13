@@ -34,6 +34,17 @@ fn main() -> ExitCode {
             let out = out_dir(&args).unwrap_or_else(|| "generated".to_string());
             generate(Path::new(schema), Path::new(&out))
         }
+        Some("new") => {
+            // subdex-codegen new <name> [--out <dir>]
+            let Some(name) = args.get(2) else {
+                eprintln!("error: `new` needs a project name");
+                usage();
+                return ExitCode::FAILURE;
+            };
+            // Default the output directory to ./<name>.
+            let out = out_dir(&args).unwrap_or_else(|| name.clone());
+            new_project(name, Path::new(&out))
+        }
         Some("--help") | Some("-h") | Some("help") | None => {
             usage();
             ExitCode::SUCCESS
@@ -67,8 +78,53 @@ USAGE:
         read models + resolvers) into <dir> (default: ./generated). Files carry a
         DO-NOT-EDIT header — edit the schema and re-run, don't hand-edit output.
 
+    subdex-codegen new <name> [--out <dir>]
+        Scaffold a runnable starter indexer project into <dir> (default: ./<name>):
+        a wired main.rs, a stub handler, schema.graphql, .env.example, and a
+        docker-compose.yml for Postgres. `cd <name> && docker compose up -d` then
+        `WS_URL=… cargo run`.
+
 See docs/rfcs/034-schema-first-codegen.md for the full pipeline."
     );
+}
+
+/// Scaffold a new project named `name` into `out`.
+fn new_project(name: &str, out: &Path) -> ExitCode {
+    if let Err(e) = subdex_codegen::scaffold::validate_name(name) {
+        eprintln!("error: {e}");
+        return ExitCode::FAILURE;
+    }
+    // Refuse to write into a non-empty directory, to avoid clobbering.
+    if out.exists()
+        && out
+            .read_dir()
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(false)
+    {
+        eprintln!("error: `{}` already exists and is not empty", out.display());
+        return ExitCode::FAILURE;
+    }
+
+    for f in subdex_codegen::scaffold::scaffold(name) {
+        let path = out.join(&f.path);
+        if let Some(parent) = path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                eprintln!("error: creating `{}`: {e}", parent.display());
+                return ExitCode::FAILURE;
+            }
+        }
+        if let Err(e) = std::fs::write(&path, &f.contents) {
+            eprintln!("error: writing `{}`: {e}", path.display());
+            return ExitCode::FAILURE;
+        }
+    }
+
+    println!(
+        "✓ scaffolded `{name}` into {}\n\n  cd {}\n  docker compose up -d\n  WS_URL=wss://rpc.polkadot.io cargo run",
+        out.display(),
+        out.display(),
+    );
+    ExitCode::SUCCESS
 }
 
 /// Load + parse a schema from a file or directory, printing an error and
