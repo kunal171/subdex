@@ -11,9 +11,9 @@
 //! It stays atomic with the cursor and the other handler (all writes share the
 //! one transaction), and avoids the per-row-upsert-per-block anti-pattern.
 
-use crate::value_ext::{as_account_ss58, as_u128, field};
 use async_trait::async_trait;
 use subdex::{Block, Handler, Prepared, Result, Store, SubdexError};
+use subdex_source::value::{field_account_ss58, field_u128};
 use subdex_store::PgStore;
 
 /// One accumulated row, ready to bulk-insert.
@@ -100,10 +100,8 @@ impl AssetsHandler {
                 block_height: block.id.number as i64,
                 event_index: ev.index as i64,
                 action,
-                asset_id: field(&ev.fields, "asset_id")
-                    .and_then(as_u128)
-                    .map(|v| v as i64),
-                owner: field(&ev.fields, "owner").and_then(as_account_ss58),
+                asset_id: field_u128(&ev.fields, "asset_id").map(|v| v as i64),
+                owner: field_account_ss58(&ev.fields, "owner", 42),
             });
         }
         out

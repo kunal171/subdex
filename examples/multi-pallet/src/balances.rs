@@ -5,9 +5,9 @@
 //! per matching event. The writes go on the processor's transaction, so they
 //! commit atomically with the cursor *and* with the other handler's writes.
 
-use crate::value_ext::{as_account_ss58, as_u128, field};
 use async_trait::async_trait;
 use subdex::{Block, Handler, Result, Store, SubdexError};
+use subdex_source::value::{field_account_ss58, field_u128};
 use subdex_store::PgStore;
 
 /// Indexes `Balances.Transfer { from, to, amount }` events.
@@ -41,9 +41,9 @@ impl Handler<PgStore> for BalancesHandler {
             if ev.pallet != "Balances" || ev.name != "Transfer" {
                 continue;
             }
-            let from = field(&ev.fields, "from").and_then(as_account_ss58);
-            let to = field(&ev.fields, "to").and_then(as_account_ss58);
-            let amount = field(&ev.fields, "amount").and_then(as_u128);
+            let from = field_account_ss58(&ev.fields, "from", 42);
+            let to = field_account_ss58(&ev.fields, "to", 42);
+            let amount = field_u128(&ev.fields, "amount");
 
             sqlx::query(
                 "INSERT INTO balance_transfers \

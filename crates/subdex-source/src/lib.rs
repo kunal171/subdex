@@ -32,9 +32,14 @@ mod source;
 #[cfg(feature = "sqd")]
 mod sqd;
 mod ss58;
+pub mod value;
 
 pub use config::{DataSelection, RetryConfig, SourceConfig};
 pub use source::{ChainConfig, SubxtSource};
+pub use value::{
+    as_account_ss58, as_u128, field, field_account_ss58, field_bigint, field_bool, field_hex,
+    field_str, field_u128, require_fields, MissingField,
+};
 
 #[cfg(feature = "sqd")]
 pub use hybrid::HybridSource;

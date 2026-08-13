@@ -1,9 +1,9 @@
 //! The example [`Handler`]: records `Assets.Deposited` / `Assets.Withdrawn`
 //! events into a `transfers` table.
 
-use crate::value_ext::{as_account_ss58, as_u128, field};
 use async_trait::async_trait;
 use subdex::{Block, Handler, Result, Store, SubdexError};
+use subdex_source::value::{field_account_ss58, field_u128};
 use subdex_store::PgStore;
 
 /// Indexes asset deposit/withdraw events. Each matching event becomes one row in
@@ -57,9 +57,9 @@ impl Handler<PgStore> for TransfersHandler {
 
             // Pull the named fields; tolerate a shape we don't recognize by
             // recording NULLs rather than failing the block.
-            let asset_id = field(&ev.fields, "asset_id").and_then(as_u128);
-            let account = field(&ev.fields, "who").and_then(as_account_ss58);
-            let amount = field(&ev.fields, "amount").and_then(as_u128);
+            let asset_id = field_u128(&ev.fields, "asset_id");
+            let account = field_account_ss58(&ev.fields, "who", 42);
+            let amount = field_u128(&ev.fields, "amount");
 
             sqlx::query(
                 "INSERT INTO transfers \
