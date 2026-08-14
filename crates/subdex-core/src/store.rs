@@ -61,4 +61,15 @@ pub trait Store: Send + Sync {
     /// corrected chain. Implementations rely on framework-managed `_block` columns
     /// to know what to delete.
     async fn rollback_to(&self, height: BlockNumber) -> Result<()>;
+
+    /// Called once by the processor when backfill reaches the finalized head,
+    /// before it starts following the tip. The default is a no-op; a store uses
+    /// this to finalize any deferred backfill work — e.g. recreating indexes that
+    /// were dropped to speed up bulk inserts (the `DEFER_INDEXES` optimization).
+    ///
+    /// Idempotent: safe to call again after a restart (a store that already
+    /// finished its deferred work should do nothing).
+    async fn on_backfill_complete(&self) -> Result<()> {
+        Ok(())
+    }
 }

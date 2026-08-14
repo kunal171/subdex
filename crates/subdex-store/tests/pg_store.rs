@@ -418,3 +418,112 @@ async fn two_handlers_get_separate_migration_tables() {
 
     drop_db("handler_migrations_two").await;
 }
+
+/// Whether an index named `name` exists in the current database.
+async fn index_exists(store: &PgStore, name: &str) -> bool {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT indexname::text FROM pg_indexes WHERE indexname = $1")
+            .bind(name)
+            .fetch_optional(store.pool())
+            .await
+            .expect("query pg_indexes");
+    row.is_some()
+}
+
+async fn deferred_count(store: &PgStore) -> i64 {
+    let (n,): (i64,) = sqlx::query_as("SELECT count(*) FROM subdex_deferred_index")
+        .fetch_one(store.pool())
+        .await
+        .expect("count deferred");
+    n
+}
+
+#[tokio::test]
+#[ignore = "database: needs Postgres; run with --ignored"]
+async fn defer_index_drops_on_fresh_and_recreates_at_backfill_complete() {
+    let url = make_db("defer_idx").await;
+    let store = PgStore::connect(StoreConfig::new(&url))
+        .await
+        .expect("connect");
+    store.init().await.expect("init");
+
+    // A handler table with an index that already exists (as `init` would create).
+    sqlx::query("CREATE TABLE t (id BIGINT PRIMARY KEY, k TEXT)")
+        .execute(store.pool())
+        .await
+        .expect("create table");
+    let create_idx = "CREATE INDEX IF NOT EXISTS t_k_idx ON t (k)";
+    sqlx::query(create_idx)
+        .execute(store.pool())
+        .await
+        .expect("create index");
+    assert!(
+        index_exists(&store, "t_k_idx").await,
+        "index exists to start"
+    );
+
+    // Fresh DB (no cursor) → defer drops the index and registers it.
+    store
+        .defer_index("t_k_idx", create_idx)
+        .await
+        .expect("defer_index");
+    assert!(
+        !index_exists(&store, "t_k_idx").await,
+        "deferred index is dropped during backfill"
+    );
+    assert_eq!(deferred_count(&store).await, 1, "registered as pending");
+
+    // Reaching head → recreate + clear the registry.
+    store
+        .on_backfill_complete()
+        .await
+        .expect("on_backfill_complete");
+    assert!(
+        index_exists(&store, "t_k_idx").await,
+        "index recreated at head"
+    );
+    assert_eq!(deferred_count(&store).await, 0, "registry cleared");
+
+    // Idempotent: calling again with nothing pending is a no-op.
+    store
+        .on_backfill_complete()
+        .await
+        .expect("second on_backfill_complete is a no-op");
+
+    drop_db("defer_idx").await;
+}
+
+#[tokio::test]
+#[ignore = "database: needs Postgres; run with --ignored"]
+async fn defer_index_on_a_resumed_db_only_ensures_the_index() {
+    let url = make_db("defer_idx_resume").await;
+    let store = PgStore::connect(StoreConfig::new(&url))
+        .await
+        .expect("connect");
+    store.init().await.expect("init");
+    sqlx::query("CREATE TABLE t (id BIGINT PRIMARY KEY, k TEXT)")
+        .execute(store.pool())
+        .await
+        .expect("create table");
+
+    // Simulate an existing indexed DB by committing a block (cursor now non-empty).
+    commit_block(&store, &block(1, "0x1", "0x0", 1)).await;
+
+    // Not fresh → defer_index must NOT drop; it ensures the index exists and
+    // registers nothing (dropping a live table's index mid-follow is wrong).
+    store
+        .defer_index("t_k_idx", "CREATE INDEX IF NOT EXISTS t_k_idx ON t (k)")
+        .await
+        .expect("defer_index on resumed db");
+    assert!(
+        index_exists(&store, "t_k_idx").await,
+        "index ensured on a resumed db"
+    );
+    assert_eq!(
+        deferred_count(&store).await,
+        0,
+        "nothing registered on a resumed db"
+    );
+
+    drop_db("defer_idx_resume").await;
+}
