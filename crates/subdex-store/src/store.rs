@@ -101,6 +101,70 @@ impl PgStore {
             .map_err(|e| store_err(&format!("handler migrations `{name}`"), e.into()))?;
         Ok(())
     }
+
+    /// Defer a non-PK index during a fresh backfill: drop it now so bulk inserts
+    /// run without index maintenance, and register it to be recreated when
+    /// backfill reaches head (via [`Store::on_backfill_complete`]). This is the
+    /// `DEFER_INDEXES` optimization — the single biggest INSERT-throughput lever
+    /// for a large backfill.
+    ///
+    /// Call this from a handler's `init` (after creating the table). `name` is the
+    /// index name (used to `DROP INDEX`); `create_ddl` is the full `CREATE INDEX`
+    /// statement to re-run at head — it should be idempotent (`IF NOT EXISTS`).
+    ///
+    /// **Opt-in and safe by default:**
+    /// - If there is **already indexed data** (a resume, not a fresh start), this
+    ///   does nothing but ensure the index exists — you don't want to drop indexes
+    ///   on a live table mid-follow.
+    /// - Only on a **fresh** database (no cursor) does it drop + register.
+    /// - Restart-safe: the pending set lives in `subdex_deferred_index`, so a crash
+    ///   mid-backfill still recreates the index on the next `on_backfill_complete`.
+    ///
+    /// Do **not** defer the primary key or a `UNIQUE` index you rely on for
+    /// `ON CONFLICT` upserts — those must exist during backfill for correctness.
+    pub async fn defer_index(&self, name: &str, create_ddl: &str) -> Result<()> {
+        // Fresh start = no cursor yet. Only then is it safe (and useful) to drop.
+        let fresh = self.cursor().await?.is_none();
+        if !fresh {
+            // Resuming an existing DB: ensure the index is present, don't drop it.
+            // The DDL is the handler's own trusted CREATE statement.
+            sqlx::query(sqlx::AssertSqlSafe(create_ddl.to_string()))
+                .execute(&self.pool)
+                .await
+                .map_err(|e| store_err(&format!("ensure index `{name}`"), e))?;
+            return Ok(());
+        }
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| store_err("defer index begin", e))?;
+        // Register first (so a crash after the drop still recreates), then drop.
+        sqlx::query(
+            "INSERT INTO subdex_deferred_index (name, ddl) VALUES ($1, $2) \
+             ON CONFLICT (name) DO UPDATE SET ddl = EXCLUDED.ddl",
+        )
+        .bind(name)
+        .bind(create_ddl)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| store_err(&format!("register deferred index `{name}`"), e))?;
+        // The index name is a validated identifier from the caller's own DDL;
+        // quote it defensively. DROP … IF EXISTS so a first run (no index yet) is
+        // fine too.
+        let drop = format!("DROP INDEX IF EXISTS \"{}\"", name.replace('"', "\"\""));
+        // Safe: the only interpolation is the caller's index name, quoted (with
+        // `"` doubled) into a single identifier.
+        sqlx::query(sqlx::AssertSqlSafe(drop))
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| store_err(&format!("drop deferred index `{name}`"), e))?;
+        tx.commit()
+            .await
+            .map_err(|e| store_err(&format!("defer index `{name}` commit"), e))?;
+        Ok(())
+    }
 }
 
 /// The per-handler migration-tracking table name for `name`, isolated from the
@@ -239,6 +303,42 @@ impl Store for PgStore {
         tx.commit()
             .await
             .map_err(|e| store_err("rollback commit", e))?;
+        Ok(())
+    }
+
+    /// Recreate every index deferred during backfill (see [`PgStore::defer_index`]),
+    /// then clear the registry. Runs each recorded `CREATE INDEX` and removes its
+    /// row in one transaction, so a crash mid-recreation leaves the not-yet-created
+    /// indexes still registered for the next run (idempotent / restart-safe).
+    async fn on_backfill_complete(&self) -> Result<()> {
+        let pending: Vec<(String, String)> =
+            sqlx::query_as("SELECT name, ddl FROM subdex_deferred_index ORDER BY name")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| store_err("deferred index list", e))?;
+
+        for (name, ddl) in pending {
+            let mut tx = self
+                .pool
+                .begin()
+                .await
+                .map_err(|e| store_err("recreate index begin", e))?;
+            // Recreate the index, then drop its registry row atomically. The DDL
+            // is the exact CREATE statement the handler supplied to `defer_index`
+            // (its own trusted schema), stored and replayed verbatim.
+            sqlx::query(sqlx::AssertSqlSafe(ddl))
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| store_err(&format!("recreate index `{name}`"), e))?;
+            sqlx::query("DELETE FROM subdex_deferred_index WHERE name = $1")
+                .bind(&name)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| store_err(&format!("clear deferred index `{name}`"), e))?;
+            tx.commit()
+                .await
+                .map_err(|e| store_err(&format!("recreate index `{name}` commit"), e))?;
+        }
         Ok(())
     }
 }

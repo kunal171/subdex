@@ -28,3 +28,14 @@ CREATE TABLE IF NOT EXISTS subdex_block (
 -- Fast "is this height already indexed / what's its hash" lookups by hash, used
 -- when validating chains across reorgs.
 CREATE INDEX IF NOT EXISTS subdex_block_hash_idx ON subdex_block (hash);
+
+-- Registry of handler indexes deferred during a fresh backfill (the
+-- DEFER_INDEXES optimization). A handler registers an index's CREATE statement
+-- in `init`; on a fresh backfill the store drops the index and records it here,
+-- then recreates it (running `ddl`) once backfill reaches head. Persisting the
+-- pending set here — rather than in a local file — makes it restart-safe: a
+-- crash mid-backfill leaves the row, so recreation still happens on the next run.
+CREATE TABLE IF NOT EXISTS subdex_deferred_index (
+    name TEXT PRIMARY KEY,   -- the index name (also what we DROP)
+    ddl  TEXT NOT NULL       -- the CREATE INDEX statement to re-run at head
+);

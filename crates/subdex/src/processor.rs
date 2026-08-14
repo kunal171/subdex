@@ -134,6 +134,9 @@ where
                 }
             }
         }
+        // Reached head. Let the store finalize deferred backfill work (e.g.
+        // recreate indexes dropped for faster bulk inserts) before follow starts.
+        self.store.on_backfill_complete().await?;
         Ok(next)
     }
 
