@@ -1,8 +1,9 @@
-/target
 **/*.rs.bk
-.env
-.env.local
 *.log
 .DS_Store
+.env
+.env.local
 /.idea
 /.vscode
+/target
+docs/book/book/

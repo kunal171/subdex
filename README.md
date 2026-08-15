@@ -512,6 +512,10 @@ mainnet→Postgres run (`subdex`), and serving GraphQL over HTTP (`subdex-graphq
 
 ## Documentation
 
+📖 **Browse the docs as a site:** the [`docs/book/`](./docs/book) mdBook builds to
+a searchable, navigable site (published to GitHub Pages via the `docs` workflow).
+Build it locally with `mdbook serve docs/book`.
+
 In-depth docs live in [`docs/`](./docs):
 
 - **[Build an indexer on your chain](./docs/GUIDE.md)** — the full build-your-own

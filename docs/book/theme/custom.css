@@ -1,0 +1,4 @@
+/* subdex docs — small refinements over the default mdBook `rust` theme. */
+.content pre > .buttons { opacity: 0.6; }
+.sidebar .sidebar-scrollbox { padding-top: 0.5rem; }
+table { display: table; width: 100%; }
