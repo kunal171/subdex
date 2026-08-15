@@ -174,6 +174,12 @@ override the `BIN`/`PACKAGE` build args to run a different binary.
 
 ## Write your own indexer
 
+> **Fastest start:** clone the [starter template](./templates/starter/) (a
+> runnable schema-first indexer), or follow the full walkthrough in
+> **[docs/GUIDE.md — Build an indexer on your chain](./docs/GUIDE.md)**, which
+> covers the options at every step (data source, schema, handler patterns,
+> config, GraphQL, observability, fast backfill, ops).
+
 An indexer is: **one `Handler`** + **wiring** (source + store + processor). Here is
 a complete, minimal example end to end.
 
@@ -508,6 +514,9 @@ mainnet→Postgres run (`subdex`), and serving GraphQL over HTTP (`subdex-graphq
 
 In-depth docs live in [`docs/`](./docs):
 
+- **[Build an indexer on your chain](./docs/GUIDE.md)** — the full build-your-own
+  walkthrough for a third-party dev: data source, schema, handler patterns, config,
+  GraphQL, observability, fast backfill, and operations, with options at each step.
 - **[Purpose & Motivation](./docs/README.md#purpose--motivation)** — why this project
   exists (runtime-upgrade drift, the Rust/TypeScript mismatch, and how subdex makes
   both problems structurally impossible).

@@ -11,6 +11,10 @@ members = [
     "crates/subdex-config",
     "crates/subdex-codegen",
 ]
+# The starter template is a standalone project (git-deps on the published crates),
+# not a workspace member — exclude it so `cargo build` never tries to compile it
+# against the local workspace.
+exclude = ["templates/starter"]
 
 [workspace.package]
 version = "0.1.0"
