@@ -1,10 +1,10 @@
 # Build an indexer on your chain
 
-A top-to-bottom guide to building a [subdex](../README.md) indexer for any
+A top-to-bottom guide to building a [subdex](https://github.com/kunal171/subdex/blob/main/README.md) indexer for any
 Substrate chain — then a reference to return to. It covers the choices at each
 step, so you can start minimal and grow.
 
-**The shortest path:** clone the [starter template](../templates/starter/), point
+**The shortest path:** clone the [starter template](https://github.com/kunal171/subdex/tree/main/templates/starter), point
 `WS_URL` at your chain, `cargo run`. Everything below explains what that template
 does and how to take it further.
 
@@ -64,7 +64,7 @@ let source = SubxtSource::connect(cfg.source_config()).await?;
 // );
 ```
 
-See [README § Data sources](../README.md#data-sources) for the full trade-offs.
+See [README § Data sources](https://github.com/kunal171/subdex/blob/main/README.md#data-sources) for the full trade-offs.
 
 ---
 
@@ -106,7 +106,7 @@ For a big schema, split it across `schema/*.graphql` and pass the directory.
 
 > **Prefer hand-written tables?** You don't have to use codegen. Create tables in
 > your handler's `init` and write rows with plain `sqlx`. The
-> [`transfers`](../examples/transfers/) example does exactly that. Codegen just
+> [`transfers`](https://github.com/kunal171/subdex/tree/main/examples/transfers) example does exactly that. Codegen just
 > removes the boilerplate.
 
 ---
@@ -164,7 +164,7 @@ The `Handler` trait has three methods; implement the one that fits.
   `INSERT` (fewer round-trips on a heavy backfill).
 - Use the **two-phase `prepare`/`write`** when per-block work is CPU-heavy: the
   engine runs every handler's `prepare` concurrently, then writes serially on the
-  shared transaction. See the [`multi-pallet`](../examples/multi-pallet/) example,
+  shared transaction. See the [`multi-pallet`](https://github.com/kunal171/subdex/tree/main/examples/multi-pallet) example,
   which shows a simple handler and a two-phase handler committing **together**.
 
 Whichever you pick, all writes ride the transaction the store hands you, so a
@@ -314,16 +314,16 @@ Public RPC is the usual bottleneck. In order of impact:
   CI / correctness runs).
 - **Docker.** The template's `docker-compose.yml` runs Postgres; the repo's
   top-level `Dockerfile` packages an indexer as a slim image (see
-  [README § Docker](../README.md#or-run-it-all-in-docker)).
+  [README § Docker](https://github.com/kunal171/subdex/blob/main/README.md#or-run-it-all-in-docker)).
 
 ---
 
 ## Where to go next
 
-- The runnable [starter template](../templates/starter/) — clone and edit.
-- [`examples/transfers`](../examples/transfers/) — a single hand-written handler.
-- [`examples/multi-pallet`](../examples/multi-pallet/) — two handlers, two write
+- The runnable [starter template](https://github.com/kunal171/subdex/tree/main/templates/starter) — clone and edit.
+- [`examples/transfers`](https://github.com/kunal171/subdex/tree/main/examples/transfers) — a single hand-written handler.
+- [`examples/multi-pallet`](https://github.com/kunal171/subdex/tree/main/examples/multi-pallet) — two handlers, two write
   patterns, one atomic commit.
-- [README](../README.md) — architecture, data-source trade-offs, reorg handling.
+- [README](https://github.com/kunal171/subdex/blob/main/README.md) — architecture, data-source trade-offs, reorg handling.
 - [RFC 034](rfcs/034-schema-first-codegen.md) — the design behind the codegen and
   builder DX.
