@@ -1,0 +1,20 @@
+# Postgres for the indexer. `docker compose up -d`, then `just run`.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: subdex
+    ports:
+      - "55432:5432"
+    volumes:
+      - my-indexer-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d subdex"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  my-indexer-pgdata:

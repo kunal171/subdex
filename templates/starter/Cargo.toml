@@ -1,0 +1,25 @@
+[package]
+name = "my-indexer"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "my-indexer"
+path = "src/main.rs"
+
+[dependencies]
+# The subdex framework crates. Pinned to the repo; swap for a crates.io version
+# once published.
+subdex = { git = "https://github.com/kunal171/subdex" }
+subdex-source = { git = "https://github.com/kunal171/subdex" }
+subdex-store = { git = "https://github.com/kunal171/subdex" }
+subdex-graphql = { git = "https://github.com/kunal171/subdex" }
+subdex-config = { git = "https://github.com/kunal171/subdex" }
+
+async-graphql = "7"
+async-trait = "0.1"
+tokio = { version = "1", features = ["full"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"

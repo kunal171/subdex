@@ -1,0 +1,36 @@
+# subdex indexer commands. Install `just` (https://github.com/casey/just), then
+# run e.g. `just up`, `just codegen`, `just run`. (Every recipe is just a shell
+# command — you can run them by hand without `just`.)
+
+# The chain to index. Override: `just ws=wss://your-node run`
+ws := "wss://rpc.polkadot.io"
+
+# Start Postgres.
+up:
+    docker compose up -d
+
+# Stop Postgres (keep data).
+down:
+    docker compose down
+
+# Regenerate src/generated/{entities,graphql}.rs + migrations/ from schema.graphql.
+codegen:
+    subdex-codegen generate schema.graphql --out src/generated
+    # the migration lands in src/generated/migrations; move it next to the crate:
+    cp -f src/generated/migrations/*.sql migrations/ 2>/dev/null || true
+
+# Build.
+build:
+    cargo build
+
+# Run the indexer (backfill then follow) + serve GraphQL on :4350.
+run:
+    WS_URL={{ws}} cargo run
+
+# Backfill only, then exit (no follow).
+backfill:
+    WS_URL={{ws}} FOLLOW=0 cargo run
+
+# Open a psql shell against the indexer DB.
+psql:
+    psql postgres://postgres:postgres@localhost:55432/subdex
