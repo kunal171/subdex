@@ -20,11 +20,13 @@
 - [Why subdex](#why-subdex)
 - [Architecture](#architecture)
 - [Quickstart — run the example](#quickstart--run-the-example)
-- [Write your own indexer](#write-your-own-indexer)
+- [Write your own indexer](#write-your-own-indexer) (incl. [schema-first codegen](#schema-first-optional))
 - [Serve a GraphQL API](#serve-a-graphql-api)
 - [Crates](#crates)
 - [Configuration](#configuration)
+- [Data sources](#data-sources)
 - [Reorgs & finality](#reorgs--finality)
+- [Observability](#observability)
 - [Testing](#testing)
 - [Documentation](#documentation)
 - [Project status](#project-status)
@@ -44,8 +46,11 @@ and your indexer keeps "working" while writing wrong data. subdex avoids this by
   shared rather than re-derived, eliminating an entire class of indexer/runtime
   drift bugs.
 - **Code-first ergonomics** — you write a small Rust `Handler` and define your own
-  tables. No schema DSL, no codegen step, full type safety and the whole Rust
-  ecosystem at your disposal.
+  tables, with full type safety and the whole Rust ecosystem at your disposal.
+  Prefer schema-first? An **optional** `schema.graphql` generates the structs,
+  migrations, typed upserts, and a GraphQL API for you (see
+  [`subdex-codegen`](#schema-first-optional)) — decoding always stays dynamic, so
+  upgrade-correctness is never traded away.
 
 It is **resumable** (a `(height, hash)` cursor survives restarts), **reorg-safe**
 (it validates parent hashes and rolls back on forks), and **atomic** (your writes
@@ -104,8 +109,9 @@ implement **`Handler`**; the framework provides the rest.
 | `Handler` | **You implement this** — turn a block into your rows | — |
 | `Store` | Owns the cursor + reorg rollback; hands handlers a txn | Postgres via `sqlx` (`subdex-store`) |
 
-Because each is a trait, the pieces are swappable — e.g. a future SQD-portal
-`DataSource` for faster backfill plugs in without touching your handlers.
+Because each is a trait, the pieces are swappable — e.g. the SQD-portal
+`DataSource` for fast backfill (see [Data sources](#data-sources)) drops in
+without touching your handlers.
 
 ---
 
@@ -303,6 +309,45 @@ async fn main() -> anyhow::Result<()> {
 That's a complete indexer. The processor resumes from the stored cursor on
 restart, rolls back on reorgs, and commits each block atomically.
 
+### Schema-first (optional)
+
+Rather than hand-writing tables and SQL, you can describe your entities in a
+`schema.graphql` and let **`subdex-codegen`** generate the boilerplate:
+
+```graphql
+type Transfer @entity {
+  id: ID!
+  blockHeight: Int! @index
+  from: String!
+  amount: BigInt!
+}
+```
+
+```bash
+subdex-codegen generate schema.graphql --out src/generated
+```
+
+This writes (all with a `DO NOT EDIT` header):
+
+- `entities.rs` — a struct per `@entity` **plus a typed `.upsert()`**;
+- `migrations/0001_schema.sql` — the `CREATE TABLE` + indexes;
+- `graphql.rs` — an `async-graphql` read API (a list + count per entity).
+
+Your handler then just builds the struct and calls `.upsert(&mut **tx)` — reading
+event fields with the [`subdex_source::value`](./crates/subdex-source) helpers
+(`field_u128`, `field_account_ss58`, `field_bigint`, …). Decoding still runs
+dynamically, so this is purely storage/serving codegen — upgrade-correctness is
+untouched.
+
+Scaffold a whole runnable project with one command:
+
+```bash
+subdex-codegen new my-indexer     # or clone templates/starter/
+```
+
+The [starter template](./templates/starter/) and the
+[**GUIDE**](./docs/GUIDE.md) walk through the full schema-first flow.
+
 ---
 
 ## Serve a GraphQL API
@@ -347,11 +392,12 @@ serves a `transfers` query alongside `indexerStatus` from a single binary.
 | Crate | Purpose | Status |
 |---|---|---|
 | [`subdex-core`](./crates/subdex-core) | Traits (`DataSource`/`Handler`/`Store`) + chain-agnostic types. No runtime/db deps. | ✅ |
-| [`subdex-source`](./crates/subdex-source) | `DataSource`s: direct RPC via `subxt` (any chain), plus an SQD-portal backfill source (`sqd` feature). | ✅ |
-| [`subdex-store`](./crates/subdex-store) | Postgres `Store` via `sqlx` — cursor, hashes, atomic commit, reorg rollback. | ✅ |
-| [`subdex`](./crates/subdex) | The engine: backfill + live-follow run loop, reorg handling. Re-exports the core API. | ✅ |
+| [`subdex-source`](./crates/subdex-source) | `DataSource`s: direct RPC via `subxt` (any chain), an SQD-portal backfill source + `HybridSource` (`sqd` feature), and the `value` field-extraction helpers for handlers. | ✅ |
+| [`subdex-store`](./crates/subdex-store) | Postgres `Store` via `sqlx` — cursor, hashes, atomic commit, reorg rollback, handler migrations, and deferred-index backfill. | ✅ |
+| [`subdex`](./crates/subdex) | The engine: backfill + live-follow run loop, reorg handling, concurrent handler compute. Re-exports the core API. | ✅ |
 | [`subdex-graphql`](./crates/subdex-graphql) | GraphQL serving toolkit (`async-graphql` + `axum`) + built-in status query. | ✅ |
 | [`subdex-config`](./crates/subdex-config) | Typed, layered (TOML + env) config loader — one `IndexerConfig::load()` builds the source/store/processor configs. | ✅ |
+| [`subdex-codegen`](./crates/subdex-codegen) | The `subdex-codegen` CLI: `schema.graphql` → entity structs + migration + typed upserts + a GraphQL API, plus a `new <name>` project scaffolder. | ✅ |
 | [`examples/transfers`](./examples/transfers) | Runnable example: a single handler indexing Assets deposits/withdrawals into Postgres, served over GraphQL. | ✅ |
 | [`examples/multi-pallet`](./examples/multi-pallet) | Runnable example: **two** pallets, **two** handlers (one bulk-writing via `process_batch`) committing atomically into two tables, served over GraphQL. | ✅ |
 
@@ -382,9 +428,10 @@ the node (~tens of blocks/sec against a public endpoint).
 
 **`SqdPortalSource` (`sqd` feature)** — a **backfill** source over the
 [SQD (Subsquid) portal](https://docs.sqd.dev), which serves pre-decoded, columnar,
-batched history far faster than per-block RPC (measured **15–50× faster** than RPC
-on Polkadot; ~1,600 blk/s on a 5k-block range). Two caveats, both inherent to the
-portal:
+batched history far faster than per-block RPC. Because the portal is columnar,
+throughput is dominated by how much you fetch: a **narrow field selection** with
+large batches is dramatically faster than pulling full block data. Two caveats,
+both inherent to the portal:
 
 - **Backfill-only.** The portal has no live Substrate tip, so `next_finalized`
   errors on its own — pair it with an RPC source via **`HybridSource`** (below).
@@ -448,9 +495,8 @@ let processor = Processor::new(source, store, handlers, config)
     .with_observer(my_observer); // Arc<dyn ProcessorObserver>
 ```
 
-Use it for a progress/ETA reporter (the [`transfers`](./examples/transfers) and
-profile-indexer examples drive their progress logs this way), a test spy, or your
-own dashboard feed.
+Use it for a progress/ETA reporter, a test spy, or your own dashboard feed — or
+enable the ready-made Prometheus observer below.
 
 ### Prometheus metrics
 
@@ -537,13 +583,20 @@ In-depth docs live in [`docs/`](./docs):
 ## Project status
 
 **Alpha.** The core pipeline — ingest → process → store → serve — is complete and
-proven end to end against a live Substrate chain, real Postgres, and real HTTP. APIs
-may still change.
+proven end to end against a live Substrate chain, real Postgres, and real HTTP.
+APIs may still change before 1.0.
 
-The roadmap toward a production-ready 0.2 — reliability (RPC retries, deep-reorg
-handling), performance (an SQD-portal `DataSource`, store pruning), observability
-(Prometheus metrics), and DX (shared config, more examples) — is tracked in the
-[**v0.2 roadmap** milestone](https://github.com/kunal171/subdex/milestone/1).
+Two milestones have shipped:
+
+- **v0.2 — reliability, performance & observability** *(complete)*: RPC retries
+  with backoff, deep-reorg handling (walk to the true common ancestor), the
+  SQD-portal + `HybridSource` data sources, store pruning, concurrent handler
+  compute, handler-owned migrations, Prometheus metrics, and shared config.
+- **v0.3 — schema-first & builder DX** *(complete)*: the `subdex-codegen` toolchain
+  (schema → structs + migration + typed upserts + GraphQL), reusable
+  field-extraction helpers, deferred-index backfill, a project scaffolder, and the
+  [starter template](./templates/starter/) + [GUIDE](./docs/GUIDE.md).
+
 Contributions welcome — issues tagged
 [`good first issue`](https://github.com/kunal171/subdex/labels/good%20first%20issue)
 are a friendly place to start.

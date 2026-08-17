@@ -31,12 +31,12 @@ strict = false
 [store]
 # url = "postgres://postgres:postgres@localhost:55432/subdex"  # or DATABASE_URL
 max_connections = 5
-reorg_retention = 256
+reorg_retention = 5000
 
 [processor]
 # start_height = 1000000
 batch_size = 100
-max_reorg_depth = 256
+max_reorg_depth = 64
 ```
 
 The example binaries add a few app-level knobs read from the environment:

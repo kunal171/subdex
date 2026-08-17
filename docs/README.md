@@ -88,17 +88,18 @@ Beyond the two core problems, a usable indexer framework has to be:
 | **Resumable** | A `(height, hash)` cursor in Postgres; on restart the engine resumes from `cursor + 1`. |
 | **Reorg-safe** | Each block's `parent_hash` is validated against the stored hash of the previous height; on a mismatch the diverged tail is rolled back and re-indexed. |
 | **Atomic** | A handler's writes and the cursor advance commit on the *same* database transaction — a block is either fully indexed or not at all; a crash never leaves a half-written block. |
-| **Ergonomic (code-first)** | You implement one `Handler` trait in plain Rust and own your tables. No schema DSL, no codegen, full type safety and the entire Rust ecosystem. |
-| **Composable** | Ingestion, storage, and serving are traits — each is swappable (e.g. a future SQD-portal source) without touching your handlers. |
+| **Ergonomic (code-first)** | You implement one `Handler` trait in plain Rust and own your tables — full type safety and the entire Rust ecosystem. An **optional** `schema.graphql` (via `subdex-codegen`) generates the structs, migrations, upserts, and GraphQL API, but decoding always stays dynamic. |
+| **Composable** | Ingestion, storage, and serving are traits — each is swappable (e.g. the SQD-portal source, or a `HybridSource`) without touching your handlers. |
 
 ### What subdex is *not*
 
-- It is **not** schema-first. There is no `schema.graphql` that generates your DB
-  model and API. You write Rust. (This is a deliberate trade: more control and
-  type-safety, at the cost of writing your own table definitions and resolvers.)
-- It is **not** (yet) a decentralized data network like SQD's. It indexes by
-  talking to a node over RPC. A columnar/portal data source can be added behind
-  the `DataSource` trait later for faster historical sync.
+- It is **not** *only* schema-first. The default path is plain Rust — you write a
+  `Handler` and own your tables. A `schema.graphql` is an **optional** convenience
+  that generates the storage/serving boilerplate; even then, decoding stays
+  dynamic (the whole point), so it never trades away upgrade-correctness.
+- It is **not** a decentralized data network like SQD's. It indexes by talking to
+  a node over RPC — though the columnar SQD-portal `DataSource` (and a
+  `HybridSource` that pairs it with an RPC tip) ship for fast historical sync.
 
 ### Who it's for
 

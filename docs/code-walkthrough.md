@@ -6,11 +6,17 @@ first for the high-level model; this document explains the actual implementation
 Crates, in dependency order:
 
 - [`subdex-core`](#subdex-core) — traits + types (no deps)
-- [`subdex-source`](#subdex-source) — subxt RPC `DataSource`
+- [`subdex-source`](#subdex-source) — subxt RPC `DataSource` (+ the SQD-portal / `HybridSource` sources under the `sqd` feature, and the `value` field-extraction helpers)
 - [`subdex-store`](#subdex-store) — Postgres `Store`
 - [`subdex`](#subdex) — the engine (`Processor`)
 - [`subdex-graphql`](#subdex-graphql) — GraphQL serving
 - [`examples/transfers`](#examplestransfers) — a complete example
+
+> Two later crates aren't walked through file-by-file here; they're documented in
+> depth elsewhere: [`subdex-config`](../crates/subdex-config) (typed TOML+env
+> config — see [Configuration](../README.md#configuration)) and
+> [`subdex-codegen`](../crates/subdex-codegen) (the schema-first toolchain — see
+> the [GUIDE](./GUIDE.md) and [RFC 034](./rfcs/034-schema-first-codegen.md)).
 
 ---
 

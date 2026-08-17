@@ -9,7 +9,7 @@ previous height:
   **true common ancestor** — comparing each stored hash against the source's
   canonical hash at that height — rolls back the diverged tail in **one** pass, and
   re-fetches from the fork point. The rewind is bounded by `MAX_REORG_DEPTH`
-  (default 256; a deeper fork errors rather than rewinding unboundedly).
+  (default 64; a deeper fork errors rather than rewinding unboundedly).
 
 Because subdex indexes finalized blocks, deep reorgs are not expected; the
 parent-hash check protects against any divergence within the retained window
