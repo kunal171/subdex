@@ -48,8 +48,9 @@ you need speed, live-follow, or both.
   correct with no per-chain codegen. It's latency-bound — throughput is capped by
   the node (tens of blocks/sec on a public endpoint). Start here.
 - **`SqdPortalSource`** pulls pre-decoded, columnar, batched history from the SQD
-  portal — far faster for backfill (15–50× vs RPC), but it **can't stream a live
-  Substrate tip**.
+  portal — far faster for backfill than per-block RPC (how much faster depends on
+  the field selection — see [step 8](#8-backfill-fast)), but it **can't stream a
+  live Substrate tip**.
 - **`HybridSource::new(portal, rpc)`** composes them: portal for the historical
   sweep, RPC to follow the tip. This is the production shape.
 
@@ -273,8 +274,9 @@ behind head-lag detection and the DEFER_INDEXES head transition).
 
 Public RPC is the usual bottleneck. In order of impact:
 
-1. **Use the portal for backfill** — `SqdPortalSource` / `HybridSource` are
-   15–50× faster than per-block RPC when a dataset exists for your chain (step 1).
+1. **Use the portal for backfill** — `SqdPortalSource` / `HybridSource` are much
+   faster than per-block RPC when a dataset exists for your chain (step 1), since
+   the portal serves columnar, batched history instead of one round trip per block.
 2. **Fetch only what you use** — `DataSelection::events_only()` skips the
    extrinsics fetch; on the portal, a narrow field selection is a fraction of the
    payload (the single biggest lever on portal throughput).

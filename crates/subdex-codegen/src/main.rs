@@ -1,14 +1,15 @@
 //! The `subdex-codegen` CLI.
 //!
 //! ```bash
-//! subdex-codegen check schema.graphql   # parse + validate, print a summary
-//! subdex-codegen check schema/          # a directory of *.graphql
+//! subdex-codegen check schema.graphql            # parse + validate, print a summary
+//! subdex-codegen generate schema.graphql         # → entities.rs + migration + graphql.rs
+//! subdex-codegen new my-indexer                  # scaffold a runnable starter project
 //! ```
 //!
-//! Generation subcommands (entities, migration, upserts, GraphQL) land in the
-//! following PRs — see `docs/rfcs/034-schema-first-codegen.md`. Today the CLI
-//! validates a schema and shows exactly what would be generated, which is already
-//! useful for catching a bad schema before it becomes a bad table.
+//! `check` validates a schema (and shows what would be generated); `generate`
+//! emits the entity structs + typed upserts, the SQL migration, and the
+//! async-graphql read API; `new` scaffolds a whole starter project. See
+//! `docs/rfcs/034-schema-first-codegen.md` for the design.
 
 use std::path::Path;
 use std::process::ExitCode;

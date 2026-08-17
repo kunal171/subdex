@@ -22,13 +22,16 @@
 //! what keeps it correct across runtime upgrades. Codegen is for the
 //! *storage and serving* side only — never the decode side.
 //!
-//! ## Status
+//! ## What it generates
 //!
-//! This crate is built in stages (see `docs/rfcs/034-schema-first-codegen.md`):
-//! 1. schema parsing → entity model
-//! 2. entity structs + SQL migration generation
-//! 3. typed upsert helpers
-//! 4. **`async-graphql` types + resolvers** ← *you are here* (Tier 1 complete)
+//! From one `schema.graphql`, `subdex-codegen generate` emits (see
+//! `docs/rfcs/034-schema-first-codegen.md`):
+//! 1. entity structs (from the parsed entity model),
+//! 2. a SQL migration (`CREATE TABLE` + indexes),
+//! 3. typed `.upsert()` helpers,
+//! 4. an `async-graphql` read API (types + resolvers).
+//!
+//! The `new` subcommand additionally scaffolds a runnable starter project.
 //!
 //! ## Supported schema dialect (v1)
 //!
