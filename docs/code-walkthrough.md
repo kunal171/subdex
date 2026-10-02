@@ -14,7 +14,7 @@ Crates, in dependency order:
 
 > Two later crates aren't walked through file-by-file here; they're documented in
 > depth elsewhere: [`subdex-config`](../crates/subdex-config) (typed TOML+env
-> config — see [Configuration](../README.md#configuration)) and
+> config — see [Configuration](./CONFIGURATION.md)) and
 > [`subdex-codegen`](../crates/subdex-codegen) (the schema-first toolchain — see
 > the [GUIDE](./GUIDE.md) and [RFC 034](./rfcs/034-schema-first-codegen.md)).
 

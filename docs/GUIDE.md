@@ -65,7 +65,7 @@ let source = SubxtSource::connect(cfg.source_config()).await?;
 // );
 ```
 
-See [README § Data sources](https://github.com/kunal171/subdex/blob/main/README.md#data-sources) for the full trade-offs.
+See [Configuration & operations § Data sources](https://github.com/kunal171/subdex/blob/main/docs/CONFIGURATION.md#data-sources) for the full trade-offs.
 
 ---
 
@@ -316,7 +316,7 @@ Public RPC is the usual bottleneck. In order of impact:
   CI / correctness runs).
 - **Docker.** The template's `docker-compose.yml` runs Postgres; the repo's
   top-level `Dockerfile` packages an indexer as a slim image (see
-  [README § Docker](https://github.com/kunal171/subdex/blob/main/README.md#or-run-it-all-in-docker)).
+  [README § Quickstart](https://github.com/kunal171/subdex/blob/main/README.md#quickstart)).
 
 ---
 
