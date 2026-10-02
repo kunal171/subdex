@@ -21,7 +21,7 @@
 # Reference
 
 - [Crates](./reference/crates.md)
-- [Configuration reference](./reference/config.md)
+- [Configuration & operations](./reference/config.md)
 - [The `@entity` schema dialect](./reference/schema-dialect.md)
 - [`subdex-codegen` CLI](./reference/codegen-cli.md)
 
