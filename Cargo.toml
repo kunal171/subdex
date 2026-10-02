@@ -32,7 +32,6 @@ async-trait = "0.1"
 
 # substrate client + scale
 subxt = "0.50"
-subxt-core = "0.50"
 parity-scale-codec = { version = "3", features = ["derive"] }
 scale-value = "0.18"
 scale-decode = "0.16"
