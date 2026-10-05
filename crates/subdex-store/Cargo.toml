@@ -3,6 +3,7 @@ name = "subdex-store"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Postgres-backed Store (cursor + reorg rollback) for the subdex framework."
 
 [dependencies]

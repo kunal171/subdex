@@ -22,7 +22,7 @@ mod server;
 mod status;
 
 pub use config::GraphqlConfig;
-pub use server::{build_status_schema, router, serve, StatusSchema};
+pub use server::{build_status_schema, router, router_with_health, serve, StatusSchema};
 pub use status::{IndexerStatus, StatusQuery};
 
 // Re-export async-graphql so users can build schemas without a separate dep.

@@ -3,6 +3,7 @@ name = "subdex"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "The subdex indexing engine: drives a DataSource through Handlers into a Store, with resumable progress and reorg handling."
 
 [dependencies]

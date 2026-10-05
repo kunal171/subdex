@@ -142,6 +142,45 @@ ask for them.
 > `SourceConfig.strict` to make such a failure a hard error instead (useful in CI
 > to catch metadata drift rather than silently write empty data).
 
+### Health endpoints
+
+The GraphQL server mounts two probe routes alongside the API, for load balancers
+and orchestrators:
+
+| Route | Meaning | Use for |
+|---|---|---|
+| `GET /healthz` | The process is up and serving. Does **no** I/O — always 200. | Liveness (k8s `livenessProbe`, ECS container check) |
+| `GET /readyz` | The database is reachable. 200 with `{"status":"ready","height":…,"indexed_blocks":…}`, or 503 `{"status":"unavailable",…}`. | Readiness (ALB/target-group health, k8s `readinessProbe`) |
+
+`/healthz` deliberately ignores the database: a liveness probe that fails on a
+transient Postgres blip would get the container killed and restarted, which does
+not fix a database. Point the restart-triggering probe at `/healthz` and the
+traffic-gating one at `/readyz`.
+
+`/readyz` needs the pool, so it comes from a separate constructor:
+
+```rust
+use subdex_graphql::{build_status_schema, router_with_health, GraphqlConfig};
+
+// router(..)             → GraphQL + /healthz
+// router_with_health(..) → GraphQL + /healthz + /readyz
+let app = router_with_health(schema, &config, pool);
+```
+
+Probe them by hand with the bundled example:
+
+```bash
+DATABASE_URL=postgres://postgres:postgres@localhost:55432/subdex \
+  cargo run -p subdex-graphql --example healthprobe
+curl -i localhost:4350/readyz
+```
+
+> Container probes: the runtime image is `debian-slim` with **no `curl`**, and
+> `/bin/sh` is dash (no `/dev/tcp`). A compose/ECS shell probe must invoke `bash`
+> explicitly — see the healthcheck in
+> [`docker-compose.yml`](../docker-compose.yml). Prefer an ALB/target-group HTTP
+> check where you have one; it needs nothing inside the image.
+
 ---
 
 ## Reorgs & finality

@@ -71,13 +71,13 @@ base58 = "0.2"
 blake2 = "0.10"
 
 # internal
-subdex = { path = "crates/subdex" }
-subdex-core = { path = "crates/subdex-core" }
-subdex-source = { path = "crates/subdex-source" }
-subdex-store = { path = "crates/subdex-store" }
-subdex-graphql = { path = "crates/subdex-graphql" }
-subdex-config = { path = "crates/subdex-config" }
-subdex-codegen = { path = "crates/subdex-codegen" }
+subdex = { path = "crates/subdex", version = "0.1.0" }
+subdex-core = { path = "crates/subdex-core", version = "0.1.0" }
+subdex-source = { path = "crates/subdex-source", version = "0.1.0" }
+subdex-store = { path = "crates/subdex-store", version = "0.1.0" }
+subdex-graphql = { path = "crates/subdex-graphql", version = "0.1.0" }
+subdex-config = { path = "crates/subdex-config", version = "0.1.0" }
+subdex-codegen = { path = "crates/subdex-codegen", version = "0.1.0" }
 
 [profile.release]
 opt-level = 3

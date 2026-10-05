@@ -3,6 +3,7 @@ name = "subdex-source"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "subxt-based direct-RPC DataSource for the subdex framework."
 
 [dependencies]
