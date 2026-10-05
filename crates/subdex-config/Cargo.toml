@@ -3,6 +3,7 @@ name = "subdex-config"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Typed, layered (TOML + env) configuration loader for subdex indexers."
 
 [dependencies]
